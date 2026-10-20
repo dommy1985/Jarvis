@@ -1,6 +1,6 @@
 # Jarvis
 
-![Jarvis architecture: tasks flow from GitHub and Jira through n8n to the server, the briefing reaches Telegram, your reply queues a job, the runner starts an agent in a git worktree, and a draft PR comes back](docs/architecture.gif)
+![Jarvis architecture: tickets from Jira and issues from GitHub flow through n8n to the server, the briefing reaches Telegram, your reply queues a job, the runner starts an agent in a git worktree, and a draft PR lands on GitHub](docs/architecture.gif)
 
 Jarvis is a small self-hosted assistant for developers who juggle many tasks and several AI coding CLIs.
 
