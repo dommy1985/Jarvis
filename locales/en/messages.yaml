@@ -1,0 +1,474 @@
+# Messaggi di Jarvis (en). Chiave -> testo con segnaposto {nome} (str.format). I tag HTML sono quelli di Telegram.
+# Stessa lista di chiavi in ogni locale (tests/test_i18n.py controlla chiavi e segnaposto).
+fmt.day_month: '%b %d'
+fmt.day_time: '%b %d %H:%M'
+fmt.time_day: '%H:%M, %b %d'
+fmt.date_full: '%Y-%m-%d'
+err.unknown_executor: 'unknown executor: «{name}»'
+err.no_item: there is no item {position}
+api.bad_date: invalid date, expected YYYY-MM-DD
+api.no_briefing: no briefing for {date}
+api.too_large: payload too large
+api.expected_object: expected a JSON object
+api.bad_plan_args: invalid date or available_hours
+api.need_date_message: date (YYYY-MM-DD) and message_id are required
+api.nothing_to_send: no briefing to send for {date}
+api.telegram_unconfigured: TELEGRAM_JARVIS_CHAT_ID/THREAD_ID/OWNER_ID are not configured
+api.need_chat: chat_id, from_id and message_id are required
+api.runner_token_missing: JARVIS_RUNNER_TOKEN is not configured
+server.internal_error: |-
+  ⚠️ Jarvis internal error: {error}
+  Check <code>docker logs jarvis</code>.
+server.warn: ⚠️ {error}.
+server.warn_nothing_queued: ⚠️ {error}. Nothing queued.
+server.warn_no_change: |-
+  ⚠️ {error}. No changes made.
+  {help}
+server.cleared: |+
+  ⏹ Removed from the queue: {count}.
+
+server.not_following_idle: 'The run is not in progress: nothing to follow.'
+server.no_direct_messages: '⚠️ Direct messages are not configured (TELEGRAM_JARVIS_BOT_TOKEN): using <code>log</code>.'
+server.follow_footer: <i>Updates itself; <code>unfollow</code> to stop.</i>
+server.stopped_following: Ok, no longer following run {runs}.
+server.not_following: You are not following any run.
+server.no_valid_briefing: No valid briefing for today.
+server.err.already_active: '{ref} is already queued or running'
+server.queued_plan: |+
+  🚀 Queued: {done}.
+  The runner is preparing the plan (read-only) and I will send it here: then <code>approve N</code>, <code>revise N &lt;text&gt;</code> or <code>discard N</code>.
+
+server.queued: |+
+  🚀 Queued: {done}.
+  The runner picks them up one at a time; I will write when they start and when the draft PR is ready.
+
+server.hint_planner_failed: 'This morning''s planner failed: write <code>briefing</code> to regenerate it.'
+server.hint_generate: Write <code>briefing</code> to generate it.
+server.no_valid_briefing_hint: No valid briefing for today. {hint}
+server.applied_confirmed: '✅ {done}. To start them: <code>go N</code> or <code>go all</code>.'
+server.applied_unconfirmed: '✏️ {done}. Not confirmed yet: write <code>ok</code> when it looks right.'
+server.err.generic: 'error: {error}'
+server.confused: |-
+  🤔 {error}
+
+  {help}
+server.no_pending_action: No GitHub action is waiting for confirmation.
+server.cancelled_action: ❌ Cancelled, I did not touch GitHub.
+server.work_hint: 'To have an agent work on it: <code>go {ref} sonnet</code>'
+server.planner_failed: |-
+  ⚠️ <b>Briefing not generated</b>: the planner failed.
+  <code>{error}</code>
+server.planner_retry: Retry with <code>hours 3</code>; if it fails again check <code>docker logs jarvis</code>.
+server.wrong_topic: 'This looks like a command for me: write it in the 🧠 Jarvis topic, I will not run it here.'
+server.follow_stopped: '⏹ Run #{run_id}: no longer following it (<code>log {run_id}</code> to see the latest actions).'
+server.follow_finished: '<i>Run finished: no longer following it.</i>'
+server.follow_hint: <i><code>unfollow</code> to stop.</i>
+server.help_briefing: 'Briefing: {commands}'
+server.help_github: 'GitHub: write what to do, e.g. <i>open issue on other-app: new logo, put it in Todo</i>.'
+server.checks_failed: 'checks failed: {error}'
+result.assigned: assigned to {names}
+result.added_to: added to {board}
+result.status: status {status}
+result.github_error: '⚠️ GitHub answered with an error: {error}'
+result.already_done: '
+
+  Already done: {done}'
+result.done: '✅ Done: {done}'
+help.full: |-
+  🧠 <b>Jarvis commands</b>
+
+  <b>Briefing</b>
+  <code>briefing</code> resends today's updated briefing
+  <code>ok</code> confirms · <code>2 haiku</code> changes the executor · <code>2 me</code> you do it
+  <code>3 skip</code> · <code>skip all</code> · <code>hours 4</code> regenerates with 4 hours
+  <code>projects</code> lists the projects we work on
+  <code>briefing on other-app</code> · <code>hours 3 on my-app and other-app</code> regenerates focused on those projects, just this once (<code>briefing on all</code> puts them all back)
+  <code>PROJ-412 agy</code> or <code>&lt;link&gt; sonnet</code> adds an imported ticket
+
+  <b>Execution</b> (runner on your machine, draft PRs)
+  <code>go 1</code> · <code>go 1 3</code> · <code>go all</code> queues the approved items
+  <code>go 4 agy</code> changes the executor and queues
+  <code>go 4 base:redesign</code> starts from that branch and the PR targets it (default: the project's <code>base_branch</code>)
+  <code>go my-app#933 sonnet</code> adds a ticket to the briefing and queues it
+  <code>queue</code> run status · <code>clear queue</code> removes the ones not started yet
+  <code>go 4 plan</code> (also <code>go 4 plan agy</code>) plan first, then you decide: <code>approve 12</code> · <code>revise 12 &lt;text&gt;</code> · <code>discard 12</code>
+  <code>log</code> (or <code>log 7</code>) latest agent actions · <code>follow</code> keeps updating them, <code>unfollow</code> to stop
+  <code>stop 7</code> (or <code>stop</code>) interrupts a run · <code>stats</code> outcomes per executor
+  <code>repair 7</code> (or <code>repair 7 agy</code>) resumes the PRs of run 7: tests, fixes, new review
+  If the work touches my-lib you get two PRs: the framework and the app with the updated submodule
+
+  Executors: {executors}
+help.github: |-
+  <b>GitHub</b> (preview, then <code>yes</code> or <code>no</code>)
+  <i>open issue on other-app: new logo, in Todo</i>
+  <i>move my-app#933 to In Progress on the Sprint 12 board</i>
+  <i>assign 940 of my-app to {owner}</i>
+  <i>clone PROJ-412 to GitHub</i>
+briefing.help_line: 'Commands: {commands}'
+briefing.help_commands: <code>ok</code> · <code>2 haiku</code> · <code>2 me</code> · <code>3 skip</code> · <code>hours 4</code> · <code>skip all</code> · <code>&lt;ticket link&gt; agy</code> · <code>briefing on other-app</code>
+briefing.hours: '{value:g}h'
+briefing.title: '🧠 <b>Briefing {weekday} {date}</b> · {hours} available #jarvis'
+briefing.confirmed_suffix: ' · ✅ confirmed'
+briefing.human: me
+briefing.skipped_detail: '    skipped'
+briefing.total: Total {total} of {available}. 📌 project rule, ✏️ your change.
+briefing.too_long: … briefing too long, later items omitted.
+briefing.all_skipped: all items skipped
+briefing.item_skipped: '{position} skipped'
+briefing.confirmed: confirmed
+briefing.added_by: Added by {owner} on Telegram.
+briefing.err.ambiguous_ref: '«{ref}» is ambiguous: write owner/repo#number'
+briefing.err.task_not_found: '{ref} is not among the imported tasks (repo or project not configured, or not assigned to you)'
+briefing.err.task_closed: '{ref} is closed'
+briefing.err.pick_projects: write which projects to focus the briefing on
+briefing.err.unknown_project: 'unknown project: «{word}» (available: {available})'
+briefing.err.ambiguous_project: '«{word}» is ambiguous: {found}'
+briefing.err.paused_project: '{key} is paused (paused: true in projects.yaml): the planner does not propose it'
+briefing.err.hours_twice: the hours are written twice
+briefing.err.hours_out_of_range: 'hours out of range: {value}'
+briefing.err.not_understood: I do not understand «{part}»
+briefing.err.empty: empty message
+briefing.err.hours_alone: '«hours N» must be sent alone: it regenerates the briefing'
+commands.verb.create_issue: Creating an issue
+commands.verb.add_to_project: Adding to the board
+commands.verb.set_status: Changing status
+commands.verb.assign: Assigning
+commands.err.not_understood: I did not understand what to do.
+commands.err.repo_not_writable: 'repo «{repo}» is not writable. Possible repos: {repos}'
+commands.err.title_needed: a title is required (max 256 characters)
+commands.err.labels: too many labels or labels too long
+commands.err.issue_number: the issue number is missing
+commands.err.assignees: 'invalid assignees: {names}'
+commands.err.assign_to_whom: assign it to whom?
+commands.err.board_not_found: board {owner}/{number} not found
+commands.err.status_not_found: 'status «{status}» does not exist in {title}: {statuses}'
+commands.err.status_needs_board: changing status needs the board
+commands.err.which_board: on which board?
+commands.err.which_status: which status?
+commands.preview.head: 🛠 <b>{verb}</b> on {target}
+commands.preview.title: <b>Title:</b> {title}
+commands.preview.body: <b>Text:</b> {body}
+commands.preview.labels: <b>Labels:</b> {labels}
+commands.preview.assignees: <b>Assigned to:</b> {assignees}
+commands.preview.board: <b>Board:</b> {board}
+commands.preview.confirm: Reply <code>yes</code> to run it, <code>no</code> to cancel (expires in {minutes} min).
+projects.title: 📂 <b>Projects</b> · {active} active
+projects.title_paused: ', {paused} paused'
+projects.focus: '🎯 Today''s briefing is focused on: {projects}'
+projects.head: <b>{name}</b> · {stack} · {open} open tasks
+projects.running: ' · {count} runs queued/running'
+projects.prs: ' · {count} open PRs'
+projects.runs_in: tasks run in the worktree of {parent}
+projects.includes: includes {names}
+projects.base: base {branch}
+projects.plan_first: plan first
+projects.no_source: no source
+projects.paused: '⏸ Paused (imported but never proposed): {names}'
+projects.footer: '<i>From <code>config/projects.yaml</code>. For a briefing on a few: <code>briefing on my-app</code></i>'
+checks.no_ingest: 'No {source} ingest recorded: check the jarvis-ingest workflow in n8n.'
+checks.stale_ingest: 'Last successful {source} ingest on {last}: tasks may be stale (n8n token expired?).'
+checks.token_broken: 'Jarvis''s GitHub token does not work ({error}): renew GITHUB_JARVIS_TOKEN.'
+checks.expired: has expired
+checks.expires_today: expires today
+checks.expires_in: expires in {days} days
+checks.token_expiring: 'Jarvis''s GitHub token {when} ({date}): create a fine-grained one and put it in GITHUB_JARVIS_TOKEN.'
+checks.hint_quota: 'Claude quota exhausted: it frees up at the time shown above. Then write <code>briefing</code> and I will regenerate it.'
+checks.hint_auth: 'This looks like a Claude authentication problem: on your machine run <code>claude setup-token</code>, update CLAUDE_CODE_OAUTH_TOKEN in the server''s .env, run <code>docker compose up -d jarvis</code>, then write <code>hours 3</code> here.'
+outcomes.bad_pr_url: 'invalid PR URL: {url}'
+outcomes.comments_one: '{count} review comment ({authors})'
+outcomes.comments_many: '{count} review comments ({authors})'
+outcomes.ci_red: red CI ({names})
+outcomes.submodule_merged: '🔁 Submodule PR merged ({pr}): realigning the submodule in the app PR of {ref} (run #{run_id}).'
+outcomes.propose_repair: |-
+  💬 Run #{run_id}: {ref} · {feedback} on the PRs.
+      Write <code>repair {run_id}</code> to have the agent fix them on the same branches (then tests and a new review).
+outcomes.stats_none: 📊 No runs in the last {days} days.
+outcomes.stats_title: 📊 <b>Outcomes, last {days} days</b>
+outcomes.avg_min: ' · {value} min avg'
+outcomes.avg_s: ' · {value} s avg'
+outcomes.stats_line: '<b>{executor}</b>: {runs} runs · {prs} PRs ({as_is} as is, {changed} with changes, {discarded} discarded) · {failed} failed · {quota} quota · {fixed} fixed after review{avg}'
+outcomes.open_prs: 'PRs still open: {count}'
+planner.by_hand: '{owner}, by hand'
+planner.no_tasks: No open eligible tasks to propose today{where}.
+planner.no_tasks_in: ' in {projects}'
+planner.err.locked: briefing {date} already {status}
+planner.err.busy: planner already running
+runs.item: item {position}
+runs.err.bad_base: 'invalid base branch name: {base}'
+runs.err.none_approved: no approved item to start (confirm the briefing with ok)
+runs.err.already_queued: '{where} is already queued'
+runs.err.already_done: '{where} is already done'
+runs.err.not_approved: '{where} is not approved: confirm the briefing with ok, or write {position} <executor>'
+runs.err.human: '{where} is yours: assign it to an agent ({position} sonnet)'
+runs.err.not_executable: '{where}: executor {name} cannot run it'
+runs.err.project_unavailable: '{where}: project not configured or paused'
+runs.planning_first: ' (plan first)'
+runs.base_suffix: ' (base {base})'
+runs.err.none_running: no run in progress
+runs.err.no_run: 'run #{run_id} does not exist'
+runs.stop_queued: '⏹ Run #{run_id} removed from the queue.'
+runs.err.not_running: 'run #{run_id} is not in progress ({status})'
+runs.stop_running: '⏹ Stopping run #{run_id}: the runner interrupts it within a minute and I will write.'
+runs.err.no_plan_waiting: no plan is waiting
+runs.err.many_plans: 'several plans are waiting ({ids}): write the number'
+runs.err.not_a_plan: 'run #{run_id} is not a plan'
+runs.plan_state.approved: already approved
+runs.plan_state.revised: already revised by a new plan
+runs.plan_state.discarded: discarded
+runs.plan_state.not_ready: not ready yet
+runs.err.plan_state: 'plan #{run_id} is {state}'
+runs.plan_approved: '👍 Plan #{plan_id} approved: queued the work with {executor} (run #{run_id}).'
+runs.err.revise_note: 'write what you want to change: revise N <text>'
+runs.plan_revised: '✏️ Queued a new plan (run #{run_id}) from #{plan_id} with your note.'
+runs.plan_discarded: '🗑 Plan #{plan_id} discarded: the item is approved again, you can relaunch it.'
+runs.err.no_log: no run in progress and no recent log
+runs.ago_s: '{value} s'
+runs.ago_min: '{value} min'
+runs.log_head: '{icon} <b>Run #{run_id}</b> {ref} · {executor} · {status}'
+runs.since: ' · for {ago}'
+runs.log_empty: No log lines (the run has just started or has not done anything yet).
+runs.err.no_open_prs: 'run #{run_id} has no open PRs to resume'
+runs.err.repair_queued: 'a run is already queued on the PRs of run #{run_id}'
+runs.err.executor_not_executable: executor {name} cannot run it
+runs.repair_work: build and tests, fixing failed tests, new review
+runs.repair_work_feedback: '{feedback} to fix, then build and tests and a new review'
+runs.repair_queued: '🛠 Queued: resuming the PRs of run #{run_id} with {name} (run #{new_id}): {work}.'
+runs.offline_since: since {time}
+runs.never_seen: never seen
+runs.offline: '⚠️ Runner offline ({when}): machine off or runner stopped. Runs start when it is back.'
+runs.stale_error: no news from the runner for {hours:g} hours
+notif.who_realign: submodule realignment
+notif.who_repair: '{executor} (repair of run #{parent})'
+notif.tests_passed: tests ok
+notif.tests_failed: ⚠️ tests failed
+notif.tests_skipped: tests not configured
+notif.plan_reviewing: is revising the plan
+notif.plan_preparing: is preparing the plan
+notif.plan_running: |-
+  📝 Run #{run_id}: {ref} {title}
+      {who} {what} (read-only: nothing is modified)
+notif.plan_ready: '📝 <b>Plan</b> · run #{run_id} · {ref} {title} · {who}'
+notif.plan_revised: ' · revised'
+notif.plan_empty: (empty plan)
+notif.plan_ready_commands: <code>approve {run_id}</code> · <code>revise {run_id} &lt;text&gt;</code> · <code>discard {run_id}</code>
+notif.sub_pr: "\n    Submodule PR: {url}"
+notif.repair_done: |-
+  🛠 Run #{run_id}: {ref} {title}
+      PRs of run #{parent} resumed
+notif.repair_pr_app: "\n    App PR: {url}\n    {who} · {tests}"
+notif.repair_details: "\n    Details in the comment on the PRs."
+notif.repair_cancelled: |-
+  ⏹ Run #{run_id}: {ref} {title}
+      repair stopped in {step}.
+notif.repair_failed: |-
+  ❌ Run #{run_id}: {ref} {title}
+      repair failed in {step}: {error}
+      The PRs stay as they were: <code>repair {parent}</code> to retry.
+notif.realign_done: |-
+  🔁 Run #{run_id}: {ref} {title}
+      submodule realigned to the framework merge in the app PR {url} · {tests}
+      The app PR can now be reviewed and merged.
+notif.realign_failed: |-
+  ❌ Run #{run_id}: {ref} {title}
+      submodule realignment failed in {step}: {error}
+      It has to be done by hand in the app PR.
+notif.running: |-
+  ▶️ Run #{run_id}: {ref} {title}
+      {who} is working on your machine
+notif.follows_plan: "\n    Following the plan #{plan_id} you approved."
+notif.quota_still_out: "\n    {executor} quota still exhausted: the counterpart starts."
+notif.to_fix: "\n    To fix: {feedback}."
+notif.cancelled: |-
+  ⏹ Run #{run_id}: {ref} {title}
+      stopped in {step}. The item is approved again.
+notif.pr_open: '✅ Run #{run_id}: {ref} {title}'
+notif.pr_kind_app: app
+notif.pr_kind_draft: draft
+notif.pr_line: "\n    {kind} PR: {url}\n    {who} · {tests}"
+notif.restarted_from: "\n    Restarted from run #{parent} because the quota was exhausted."
+notif.done_by_counterpart: "\n    Done by the counterpart: {executor} quota exhausted."
+notif.merge_order: "\n    Merge: submodule first; after the merge I realign the pointer in the app PR and write to you."
+notif.failed: |-
+  ❌ Run #{run_id}: {ref} {title}
+      failed in {step}: {error}
+      The item is approved again: you can relaunch it.
+notif.quota_retry: "\n    {who} quota exhausted: restarting with {executor} (run #{run_id})."
+notif.quota_out: "\n    Executor quota exhausted: change executor or retry after the reset."
+notif.agent_summary: '
+
+
+  <b>Agent summary</b>
+
+  {summary}'
+notif.review_not_run: 'review {who}: not run ({error})'
+notif.review_clean: 'review {who}: no problems'
+notif.review_fixed: ', fixed'
+notif.review_summary: 'review {who}: {count} remarks, {serious} serious{fixed}'
+status.title: 🏃 <b>Runner queue</b>
+status.runner_seen: ' · runner seen at {time}'
+status.runner_never: ' · runner never seen'
+status.plan_proposed: 'plan to approve: approve {run_id}'
+status.plan_approved: plan approved
+status.plan_revised: plan revised
+status.plan_discarded: plan discarded
+status.plan: plan
+status.plan_extra: plan · {extra}
+status.empty: Nothing queued and no runs in the last 24 hours.
+prov.missing_binary: '{binary} not found in PATH'
+prov.timeout: '{name} -p exceeded {timeout}s'
+prov.agent_timeout: agent exceeded the maximum time
+prov.reviewer_timeout: reviewer exceeded the maximum time
+prov.agent_unreadable: 'unreadable output (exit {code}): {tail}'
+prov.reviewer_unreadable: 'unreadable reviewer output (exit {code}): {tail}'
+prov.no_review: the reviewer did not return the structured review
+prov.agy_denied: '
+
+
+  (agy stopped on a command that is not allowed: {names}{command})'
+prov.copilot_not_logged_in: 'copilot: not authenticated (copilot /login, or GH_TOKEN / gh auth login)'
+prov.copilot_no_json: 'copilot -p exit {code}: no JSON object in the answer: {tail}'
+prov.not_conforming: '{name}: answer does not conform to the schema{retry}: {errors}'
+prov.after_retry: ' even at the second attempt'
+prov.schema_prompt: '
+
+
+  Answer ONLY with a valid JSON object, with no text before or after and no code fences, conforming to this JSON Schema:
+
+  {schema}'
+prov.retry_prompt: '
+
+
+  Your previous answer was not valid:
+
+  {errors}
+
+  Answer again with only the corrected JSON.'
+schema.expected: '{path}: expected {kinds}, found {found}'
+schema.or: ' or '
+schema.enum: '{path}: {value} is not among the allowed values {allowed}'
+schema.minimum: '{path}: {value} is below the minimum {limit}'
+schema.maximum: '{path}: {value} is above the maximum {limit}'
+schema.missing: '{path}: missing {key}'
+schema.extra: '{path}: unexpected field {key}'
+marker.repair_comment: 🛠 Jarvis repair
+marker.submodule_comment: Submodule PR `
+runner.unknown_cli: 'unknown cli: {cli}'
+runner.none: none
+runner.commands_skip_permissions: any local command the task needs, run from this folder; no push, `gh`, global installs or changes outside the worktree
+runner.commands_allowed: 'only {allowed}. Any other command is denied and may interrupt the session: do not try them, to read and search the code use your reading and search tools'
+runner.note_submodule: '`{path}` is a submodule (separate repo). If the task requires changing it, edit it directly there, without branches or commits: Jarvis opens a PR on the submodule and one on the app with the updated pointer. For its code also follow its rules (`{path}/AGENTS.md`).'
+runner.note_submodule_test: ' Submodule tests: `cd {path} && {test}`.'
+runner.note_focus: 'The task belongs to the submodule `{focus}`: the fix goes there, touch the app only if needed to adapt it.'
+runner.note_submodule_plan: '`{path}` is a submodule (separate repo) and may be touched by the work: also read its rules (`{path}/AGENTS.md`).'
+runner.tests_passed: passed
+runner.tests_failed: failed
+runner.tests_skipped: not configured
+runner.review_retry: '
+
+
+  The previous attempt stopped on a denied shell command: do not run commands, use only the file reading and search tools.'
+runner.diff_truncated: '
+
+  [... diff truncated: read the files in the worktree ...]'
+runner.failed_tests_head: 'Failed tests:'
+runner.fb.failed_tests: failed_tests
+runner.fb.pr_comments: pr_comments
+runner.fb.failed_ci: failed_ci
+runner.fb.author: author
+runner.fb.file: file
+runner.fb.pr: pr
+runner.fb.text: text
+runner.fb.check: check
+runner.fb.result: result
+runner.fb.details: details
+runner.quota_detail: '{bucket} until {reset}'
+runner.feed.tests: 🧪 build and tests
+runner.feed.review: 🔍 cross review with {name}
+runner.feed.agent: 🚀 {name} at work
+runner.feed.fix: 🛠 fixing tests and review problems
+runner.feed.push: ⬆️ commit and push
+runner.feed.pr: 📬 opening the PRs
+runner.feed.setup: ⚙️ setup
+runner.feed.plan: 📝 {name} is preparing the plan (read-only)
+runner.err.base_invalid: 'invalid base branch name: {name}'
+runner.err.base_missing: 'base branch not found on origin: {name}'
+runner.err.secrets: 'files that look like secrets in the commit: {files}'
+runner.err.pr_create: 'gh pr create exit {code}: {tail}'
+runner.err.setup: '`{command}` exit {code}: {tail}'
+runner.err.submodule_missing: submodule {path} not initialized (missing from the project setup?)
+runner.err.not_ready: '{cli} not ready: {reason}'
+runner.err.quota: '{cli} quota exhausted: {detail}'
+runner.err.review_quota: '{name} quota exhausted ({detail})'
+runner.err.no_change: 'no changes: the agent stopped'
+runner.err.branch: 'branch not allowed: {branch}'
+runner.err.nothing_in_sub: nothing to commit in {path} besides local files
+runner.err.nothing: nothing to commit besides local files
+runner.err.no_plan: the agent did not write any plan
+runner.err.runner: 'runner error: {error}'
+runner.note.local_missing: 'local file not found, not copied: `{label}{name}`'
+runner.note.transient: 'the agent''s first attempt failed with a temporary error: {error}'
+runner.note.reviewer_edited: 'the reviewer modified files in `{name}`: changes reverted'
+runner.note.fix_failed: 'fix failed: {error}'
+runner.note.sub_tests: 'tests of `{path}` (`{command}`): {result}'
+runner.plan_note_reverted: '
+
+
+  (runner note: the agent had modified files in `{name}`: reverted)'
+runner.fix_after_tests: '## Fixes after the failed tests'
+runner.commit_title_fix: '{id}: fixes after tests and review'
+runner.commit_body: 'Run Jarvis #{run_id}, executor {executor}.'
+runner.realign_commit_body: 'Merge of {pr}. Run Jarvis #{run_id} (realignment of run #{parent}).'
+runner.realign_noop: submodule already on the merged commit
+runner.merge_note: 'Merge order: submodule PR first; then move the app''s submodule to the merged commit (with squash `{branch}` disappears) and merge this one.'
+runner.app_pr_pending: 'App PR with the updated pointer: to follow.'
+runner.app_pr_link: 'App PR with the updated pointer: {url}'
+runner.sub_pr_link: 'Submodule PR `{path}`: {url}'
+runner.pr.task: 'Task: [{id}]({url}) — {title}'
+runner.pr.executor: 'Executor: `{name}` ({model}) · Jarvis run #{run_id}'
+runner.pr.fallback: ' · restarted with the counterpart: `{executor}` quota exhausted'
+runner.pr.tests_skipped: 'Build and tests: not configured for the project.'
+runner.pr.tests: 'Build and tests (`{command}`): {result}'
+runner.pr.passed: ✅ passed
+runner.pr.failed: ❌ failed
+runner.pr.last_lines: <details><summary>Last lines</summary>
+runner.pr.summary_head: '## Agent summary'
+runner.pr.no_summary: (no summary)
+runner.pr.notes_head: '## Runner notes'
+runner.pr.footer: 'Draft PR opened by Jarvis: to be reviewed before merging.'
+runner.review.head: '## Cross review ({reviewer})'
+runner.review.not_run: 'Not run: {error}'
+runner.review.no_issues: No problems.
+runner.review.fixes_head: '### Fixes after the review'
+runner.review.fix_failed: 'Fix failed: {error}'
+runner.repair.head: '{marker} (run #{run_id}, executor `{executor}`)'
+runner.repair.pushed: New commits on the branch.
+runner.repair.not_pushed: 'No change needed: nothing new on the branch.'
+runner.repair.passed_to_agent: 'Passed to the agent: {count} review comments'
+runner.repair.failed_checks: ', failed checks: {checks}'
+runner.repair.tests: 'Build and tests: {result}'
+runner.repair.still_failed: ❌ still failing
+config.err.missing_section: 'missing section: {key}'
+config.err.owner_string: owner.{field} must be a string
+config.err.locale: 'unknown owner.locale: {locale} (available: {available})'
+config.err.timezone: 'unknown owner.timezone: {timezone}'
+config.err.ingest_hours: ingest.hours must be [first hour, last hour], 0-23
+config.err.routing: 'routing.{task_type}: unknown executor {executor}'
+config.err.section_executor: '{section}.executor must be an executor with a registered cli ({clis})'
+config.err.fallback_key: 'fallbacks.{key}: neither an executor nor a family'
+config.err.fallback_list: fallbacks.{key} must be a list without repetitions
+config.err.fallback_executor: 'fallbacks.{key}: executor cannot run tasks: {executor}'
+config.err.fallback_self: 'fallbacks.{key}: contains itself'
+config.err.counterpart_executor: 'counterparts.{family}: executor cannot run tasks: {executor}'
+config.err.counterpart_family: 'counterparts.{family}: {executor} is in the same family'
+config.err.project_field: 'projects.{name}: missing {field}'
+config.err.override: 'projects.{name}.override.{task_type}: unknown executor {executor}'
+ingest.err.tasks_list: tasks must be a list
+ingest.err.missing_fields: 'tasks[{index}]: missing fields {missing}'
+ingest.err.unknown_source: 'tasks[{index}]: unknown source {source}'
+ingest.err.complete_sources: 'invalid complete_sources: {complete}'
+ingest.err.empty_snapshot: 'empty snapshot: pass allow_empty=true if intended'
+github.err.issue_not_found: issue {repo}#{number} not found
+runs.err.update_no_run: run {run_id} does not exist
+runs.err.update_not_running: run {run_id} is not running ({status})
+runs.err.bad_status: 'invalid status: {status}'
+runs.err.bad_step: 'invalid step: {step}'

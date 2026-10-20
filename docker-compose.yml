@@ -1,0 +1,59 @@
+# Jarvis server (+ optional n8n for ingest and the morning briefing).
+#   docker compose up -d --build            server only
+#   docker compose --profile n8n up -d      server + n8n
+# Everything is configured through .env (see .env.example); nothing here is specific to one machine.
+services:
+  jarvis:
+    build:
+      context: .
+      dockerfile: jarvis/Dockerfile
+    image: ${JARVIS_IMAGE:-jarvis:local}        # set JARVIS_IMAGE to a published tag to skip the build
+    container_name: jarvis
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-UTC}
+      - JARVIS_API_TOKEN=${JARVIS_API_TOKEN:?JARVIS_API_TOKEN is missing in .env}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - GITHUB_JARVIS_TOKEN=${GITHUB_JARVIS_TOKEN:-${GITHUB_TOKEN:-}}
+      - TELEGRAM_JARVIS_BOT_TOKEN=${TELEGRAM_JARVIS_BOT_TOKEN:-}
+      - TELEGRAM_JARVIS_CHAT_ID=${TELEGRAM_JARVIS_CHAT_ID:-}
+      - TELEGRAM_JARVIS_THREAD_ID=${TELEGRAM_JARVIS_THREAD_ID:-}
+      - TELEGRAM_JARVIS_OWNER_ID=${TELEGRAM_JARVIS_OWNER_ID:-}
+      - JARVIS_RUNNER_TOKEN=${JARVIS_RUNNER_TOKEN:-}
+    ports:
+      # Local only. Same machine: the runner uses http://127.0.0.1:8090. Another machine: open an SSH tunnel to it.
+      - "127.0.0.1:${JARVIS_PORT:-8090}:8080"
+    volumes:
+      - jarvis_data:/data
+      - ${JARVIS_CONFIG_DIR:-./config}:/app/config:ro   # projects.yaml: edit and restart, no rebuild
+    networks:
+      - jarvis
+      - jarvis_egress
+
+  n8n:
+    profiles: ["n8n"]
+    image: n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-UTC}
+      - GENERIC_TIMEZONE=${TZ:-UTC}
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+    ports:
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - jarvis
+      - jarvis_egress
+
+volumes:
+  n8n_data:
+  jarvis_data:
+
+networks:
+  jarvis:
+    internal: true        # n8n reaches the server as http://jarvis:8080
+  jarvis_egress:          # outgoing calls: provider CLIs, GitHub API, Telegram

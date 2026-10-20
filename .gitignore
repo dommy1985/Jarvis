@@ -1,0 +1,13 @@
+.env
+.env.bak*
+*.db
+*.db-wal
+*.db-shm
+backups/
+n8n_data/
+*.log
+.DS_Store
+.idea/
+.venv/
+__pycache__/
+.claude/settings.local.json

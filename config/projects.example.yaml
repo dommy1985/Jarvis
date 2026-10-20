@@ -1,0 +1,105 @@
+# Jarvis configuration: who you are, which providers run what, and which projects Jarvis can work on.
+# Copy to projects.yaml. Project rules (build, test, conventions) belong in each repo (AGENTS.md / CLAUDE.md);
+# here only what Jarvis itself needs. Paths are those of the machine that runs the runner.
+
+owner:
+  name: Alex                  # how prompts and messages refer to you
+  profile: backend developer  # optional, shown after the name in the prompts
+  timezone: UTC               # IANA name, e.g. Europe/Rome
+  locale: en                  # en or it
+  github: alex-dev            # your GitHub login; used for assignee filters and as default assignee
+
+defaults:
+  available_hours: 3          # daily default; override from Telegram with "hours N"
+  eligible_label: jarvis      # tasks you did not create enter the queue only with this label
+  eligible_if_assigned: []    # sources where assignment to you is enough, e.g. [jira]
+
+ingest:
+  hours: [7, 20]              # first and last hour of the n8n ingest cron ("0 7-20 * * *"): keep them aligned
+  jira_jql: assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC
+  personal_assignee_only: false
+
+planner:
+  executor: claude-sonnet     # who writes the morning briefing; any executor whose cli is registered
+  max_tasks: 60
+  timeout_seconds: 300
+  exclude_statuses: [done, on hold, in review]
+
+commands:                     # GitHub commands written on Telegram (omit the section to disable them)
+  executor: claude-sonnet
+  timeout_seconds: 120
+  confirm_minutes: 30
+  write_owners: [alex-dev]    # GitHub owners Jarvis may write to, only on repos listed in `projects`
+
+runner:
+  worktrees: ~/.jarvis/worktrees
+  setup_timeout_minutes: 30
+  agent_timeout_minutes: 60
+  test_timeout_minutes: 45
+  stale_hours: 3
+
+# cli: claude | agy | copilot. family is used to pick a reviewer from another family.
+executors:
+  claude-sonnet: { cli: claude,  model: sonnet,              family: anthropic }
+  claude-haiku:  { cli: claude,  model: haiku,               family: anthropic }
+  claude-opus:   { cli: claude,  model: opus,                family: anthropic }
+  antigravity:   { cli: agy,     model: gemini-3.8-flash-high, family: google }
+  # copilot:     { cli: copilot, model: auto,                family: github }
+  me:            { human: true }   # "I do it myself": nothing is executed
+
+routing:                      # task type -> executor
+  bugfix:       claude-sonnet
+  feature:      claude-sonnet
+  refactor:     antigravity
+  dependencies: antigravity
+  test:         claude-haiku
+  docs:         antigravity
+  architecture: claude-opus
+
+# When the chosen executor is out of quota or its CLI is not installed, the run restarts with the first executor
+# of its list not yet tried. The reviewer is the first of the list from another family.
+# Key: an executor name or a family; the executor wins.
+fallbacks:
+  anthropic: [antigravity]
+  google:    [claude-sonnet]
+
+review:
+  fix_rounds: 1
+  timeout_minutes: 15
+plan:
+  timeout_minutes: 15
+outcomes:
+  check_minutes: 10
+
+# Optional per project: base_branch, plan_first, paused, redact_description, setup, build, test, copy_files,
+# submodules, agent_notes, override (task type -> executor).
+projects:
+  my-app:
+    path: ~/code/my-app
+    sources:
+      github: [alex-dev/my-app]
+    stack: node
+    setup: npm ci
+    build: npm run build
+    test: npm test
+    override: { feature: claude-sonnet }
+
+  my-service:
+    path: ~/code/my-service
+    sources:
+      github: [acme/my-service]
+      jira: [SVC]
+    stack: python
+    setup: uv sync
+    test: uv run pytest
+    # path -> project: if the agent changes the submodule, the runner opens two linked PRs
+    submodules: { libs/shared: my-shared }
+    agent_notes:
+      - "Add a line under `## [Unreleased]` in CHANGELOG.md for every module you touch."
+
+  my-shared:
+    path: ~/code/my-shared
+    sources:
+      github: [acme/my-shared]
+    stack: python
+    test: uv run pytest

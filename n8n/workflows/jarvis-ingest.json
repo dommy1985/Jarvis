@@ -1,0 +1,347 @@
+{
+  "name": "jarvis-ingest",
+  "nodes": [
+    {
+      "id": "ji-schedule",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7-20 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ji-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "ji-sources",
+      "name": "Jarvis - sources",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://jarvis:8080/sources",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Jarvis API"
+        }
+      }
+    },
+    {
+      "id": "ji-myself",
+      "name": "Jira - myself",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://REPLACE_WITH_JIRA_HOST.atlassian.net/rest/api/3/myself",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "jiraSoftwareCloudApi",
+        "options": {}
+      },
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    },
+    {
+      "id": "ji-jira",
+      "name": "Jira - task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://REPLACE_WITH_JIRA_HOST.atlassian.net/rest/api/3/search/jql",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "jiraSoftwareCloudApi",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "jql",
+              "value": "={{ $('Jarvis - sources').first().json.jira_jql }}"
+            },
+            {
+              "name": "fields",
+              "value": "summary,status,issuetype,labels,reporter,assignee,description,project"
+            },
+            {
+              "name": "maxResults",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    },
+    {
+      "id": "ji-gh-team",
+      "name": "GitHub - team",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/graphql",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: \"query($q: String!) { search(query: $q, type: ISSUE, first: 100) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on Issue { number title body url state author { login } labels(first: 20) { nodes { name } } assignees(first: 5) { nodes { login } } repository { nameWithOwner } projectItems(first: 10) { nodes { fieldValues(first: 20) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } } } } } } } } }\", variables: { q: $('Jarvis - sources').first().json.github_queries.team } }) }}",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "query",
+                    "value": "={{ \"query($q: String!) { search(query: $q, type: ISSUE, first: 100) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on Issue { number title body url state author { login } labels(first: 20) { nodes { name } } assignees(first: 5) { nodes { login } } repository { nameWithOwner } projectItems(first: 10) { nodes { fieldValues(first: 20) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } } } } } } } } }\".replace('first: 100)', 'first: 100, after: ' + JSON.stringify($response.body.data.search.pageInfo.endCursor) + ')') }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.data.search.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 10
+            }
+          }
+        }
+      },
+      "credentials": {
+        "githubApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "id": "ji-gh-personal",
+      "name": "GitHub - personale",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/graphql",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: \"query($q: String!) { search(query: $q, type: ISSUE, first: 100) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on Issue { number title body url state author { login } labels(first: 20) { nodes { name } } assignees(first: 5) { nodes { login } } repository { nameWithOwner } projectItems(first: 10) { nodes { fieldValues(first: 20) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } } } } } } } } }\", variables: { q: $('Jarvis - sources').first().json.github_queries.personal } }) }}",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "query",
+                    "value": "={{ \"query($q: String!) { search(query: $q, type: ISSUE, first: 100) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on Issue { number title body url state author { login } labels(first: 20) { nodes { name } } assignees(first: 5) { nodes { login } } repository { nameWithOwner } projectItems(first: 10) { nodes { fieldValues(first: 20) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } } } } } } } } }\".replace('first: 100)', 'first: 100, after: ' + JSON.stringify($response.body.data.search.pageInfo.endCursor) + ')') }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.data.search.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 10
+            }
+          }
+        }
+      },
+      "credentials": {
+        "githubApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "id": "ji-normalize",
+      "name": "Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Normalizza Jira e GitHub nel payload di POST /ingest (vedi jarvis/ingest.py).\n// Lo snapshot deve essere completo: se una sorgente è paginata o troncata, meglio fallire che chiudere task a torto.\nconst JIRA_BASE = 'https://REPLACE_WITH_JIRA_HOST.atlassian.net';\nconst MAX_DESCRIPTION = 8000;\n\nfunction adfToText(node) {\n  if (!node) return '';\n  if (node.type === 'text') return node.text || '';\n  const inner = (node.content || []).map(adfToText).join('');\n  return ['paragraph', 'heading', 'listItem', 'codeBlock'].includes(node.type) ? inner + '\\n' : inner;\n}\n\nfunction truncate(s) {\n  return s && s.length > MAX_DESCRIPTION ? s.slice(0, MAX_DESCRIPTION) + '…' : s;\n}\n\nfunction projectStatus(issue) {\n  for (const pi of issue.projectItems?.nodes || []) {\n    for (const fv of pi.fieldValues?.nodes || []) {\n      if (fv.field?.name === 'Status' && fv.name) return fv.name;\n    }\n  }\n  return null;\n}\n\nconst me = $('Jira - myself').first().json;\nconst jira = $('Jira - task').first().json;\nif (jira.isLast === false || jira.nextPageToken) {\n  throw new Error('Jira: risultati paginati, snapshot incompleto. Restringere la JQL o gestire la paginazione.');\n}\n\nconst tasks = (jira.issues || []).map((issue) => ({\n  source: 'jira',\n  external_id: issue.key,\n  container: issue.fields.project.key,\n  title: issue.fields.summary,\n  description: truncate(adfToText(issue.fields.description).trim()) || null,\n  url: `${JIRA_BASE}/browse/${issue.key}`,\n  source_status: issue.fields.status.name,\n  labels: issue.fields.labels || [],\n  created_by: issue.fields.reporter?.accountId || null,\n  assignee: issue.fields.assignee?.accountId || null,\n  issue_type: issue.fields.issuetype?.name || null,\n}));\n\nfor (const node of ['GitHub - team', 'GitHub - personale']) {\n  // Una pagina per item (paginazione del nodo HTTP).\n  const pages = $(node).all().map((i) => i.json);\n  const errors = pages.find((p) => p.errors);\n  if (errors) throw new Error(`${node}: ${JSON.stringify(errors.errors)}`);\n  const issues = pages.flatMap((p) => p.data.search.nodes);\n  const issueCount = pages[0].data.search.issueCount;\n  if (issueCount > issues.length) {\n    throw new Error(`${node}: ${issueCount} issue ma solo ${issues.length} ricevute, snapshot incompleto.`);\n  }\n  for (const issue of issues) {\n    const repo = issue.repository.nameWithOwner;\n    tasks.push({\n      source: 'github',\n      external_id: `${repo}#${issue.number}`,\n      container: repo,\n      title: issue.title,\n      description: truncate(issue.body) || null,\n      url: issue.url,\n      source_status: projectStatus(issue) || issue.state,\n      labels: issue.labels.nodes.map((l) => l.name),\n      created_by: issue.author?.login || null,\n      assignee: issue.assignees.nodes[0]?.login || null,\n    });\n  }\n}\n\nreturn [{ json: { identities: { jira: me.accountId }, complete_sources: ['jira', 'github'], tasks } }];\n"
+      }
+    },
+    {
+      "id": "ji-ingest",
+      "name": "Jarvis - ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://jarvis:8080/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Jarvis API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Jarvis - sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jarvis - sources": {
+      "main": [
+        [
+          {
+            "node": "Jira - myself",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jira - myself": {
+      "main": [
+        [
+          {
+            "node": "Jira - task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jira - task": {
+      "main": [
+        [
+          {
+            "node": "GitHub - team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub - team": {
+      "main": [
+        [
+          {
+            "node": "GitHub - personale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub - personale": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "Jarvis - ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Jarvis - sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

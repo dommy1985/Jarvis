@@ -1,0 +1,17 @@
+# Installato da scripts/install-runner.sh in ~/.config/systemd/user (sostituisce i segnaposto @...@).
+# Gira con l'utente; per tenerlo acceso anche senza login: loginctl enable-linger $USER
+[Unit]
+Description=Jarvis runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO@
+ExecStart=@UV@ run --project @REPO@ python -m runner.runner
+Restart=always
+RestartSec=60
+# i log vanno nel journal: journalctl --user -u @UNIT@ -f
+
+[Install]
+WantedBy=default.target

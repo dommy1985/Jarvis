@@ -1,0 +1,150 @@
+# Vocabolario dei comandi Telegram (en): le parole che l'owner scrive. Il parsing accetta solo le parole del
+# locale scelto (owner.locale); le altre lingue non vengono riconosciute.
+help_words:
+- help
+- commands
+- '?'
+- /help
+- /start
+show_words:
+- briefing
+- show briefing
+- today's briefing
+- /briefing
+projects_words:
+- projects
+- list projects
+- project list
+- the projects
+outcome_words:
+- stats
+- statistics
+- outcomes
+queue_words:
+- queue
+- status
+- runner
+clear_words:
+- clear queue
+- empty queue
+- cancel queue
+stop_follow:
+- unfollow
+- stop following
+- enough
+'yes':
+- 'yes'
+- y
+- yep
+- execute
+- do it
+'no':
+- 'no'
+- cancel
+- never mind
+no_prefixes:
+- never mind
+confirm:
+- ok
+- ok!
+- okay
+- confirm
+- confirmed
+- looks good
+- go
+skip:
+- skip
+- drop
+- remove
+- 'no'
+human:
+- me
+- myself
+- by hand
+- i do it
+skip_all:
+- skip all
+- skip everything
+- none
+- nothing
+- nobody
+filler:
+- do
+- make
+- have
+- with
+- by
+- use
+- using
+- assign
+- to
+- for
+- the
+- a
+- an
+- it
+- ticket
+- issue
+- task
+- add
+- also
+- and
+focus_all:
+- all
+- everything
+- everywhere
+- none
+- all projects
+hours_word:
+- hours
+- hour
+briefing_word:
+- briefing
+focus_preps:
+- 'on'
+- for
+- only
+and_word:
+- and
+weekdays:
+- Mon
+- Tue
+- Wed
+- Thu
+- Fri
+- Sat
+- Sun
+go_verbs:
+- go
+- launch
+- start
+all_words:
+- all
+with_word:
+- with
+base_word:
+- base
+plan_word:
+- plan
+the_word:
+- the
+run_word:
+- run
+approve_verbs:
+- approve
+discard_verbs:
+- discard
+revise_verbs:
+- revise
+log_words:
+- log
+follow_words:
+- follow
+repair_verbs:
+- repair
+- resume
+- fix
+stop_verbs:
+- stop
+- abort
+- interrupt

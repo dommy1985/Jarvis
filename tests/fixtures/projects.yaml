@@ -1,0 +1,188 @@
+# Configurazione Jarvis: esecutori, routing, progetti.
+# Le regole tecniche vivono nei progetti (AGENTS.md / CLAUDE.md), qui solo ciò che serve a Jarvis.
+# I path sono quelli del Mac: li usa il runner, il planner sul VPS li ignora.
+
+defaults:
+  available_hours: 3        # override giornaliero da Telegram con "ore N"
+  eligible_label: jarvis    # task non creati da Alex entrano in coda solo con questa label
+  # Sorgenti dove basta l'assegnazione a Alex (su un progetto configurato). Jira: il planner
+  # non vede le descrizioni, quindi il testo del ticket non arriva al modello.
+  eligible_if_assigned: [jira]
+
+owner:
+  name: Alex
+  profile: sviluppatore Android e React Native   # tra parentesi dopo il nome nei prompt
+  timezone: Europe/Rome
+  locale: it                # lingua di messaggi, comandi e prompt (default en): locales/it
+  github: alex-dev         # l'account Jira arriva da /myself a ogni ingest
+
+ingest:
+  hours: [7, 20]         # primo e ultimo giro del cron di jarvis-ingest in n8n ("0 7-20 * * *"): tenerli allineati
+  jira_jql: assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC
+  # true: sui repo personali solo le issue assegnate a owner.github. Sui repo di org sempre tutte le aperte.
+  personal_assignee_only: false
+
+planner:
+  executor: claude-sonnet   # chi scrive il briefing (claude -p, subscription)
+  max_tasks: 60             # task più recenti passati al planner
+  timeout_seconds: 300
+  # Stati (case-insensitive) che non vanno proposti: lavoro fermo o già finito.
+  exclude_statuses: [done, on hold, ready for testing, in review]
+  # I ticket Jira (Example) e i progetti con redact_description: true arrivano al planner
+  # solo con id, titolo, tipo e stato, finché non è verificato il contratto Acme.
+
+commands:
+  executor: claude-sonnet   # interpreta i comandi GitHub scritti su Telegram (claude -p, subscription)
+  timeout_seconds: 120
+  confirm_minutes: 30       # dopo, l'azione in attesa di "sì" scade
+  # Owner GitHub su cui Jarvis può scrivere (issue, assegnazioni, board), solo sui repo elencati nei progetti.
+  write_owners: [alex-dev, acme]
+
+runner:                     # fase 2: runner sul Mac (runner/), un task alla volta
+  worktrees: ~/.jarvis/worktrees
+  setup_timeout_minutes: 30
+  agent_timeout_minutes: 60
+  test_timeout_minutes: 45  # build + test lanciati dal runner dopo l'agente
+  stale_hours: 3            # run senza notizie dal runner oltre questo limite: fallito
+
+executors:
+  claude-sonnet: { cli: claude, model: sonnet, family: anthropic }
+  claude-opus:   { cli: claude, model: opus,   family: anthropic }
+  claude-haiku:  { cli: claude, model: haiku,  family: anthropic }
+  # skip_permissions: in headless agy si ferma al primo comando fuori dalla sua allowlist. Scelta di Alex
+  # (13/10/2026): tutti i permessi nel worktree; push, gh e credenziali git restano spenti dal runner.
+  antigravity:   { cli: agy,    model: gemini-3.8-flash-high, family: google, skip_permissions: true }
+  me:            { human: true }   # "la faccio io": nessuna esecuzione
+
+routing:
+  bugfix:         claude-sonnet
+  feature:        claude-sonnet
+  refactor-ampio: antigravity
+  dipendenze:     antigravity
+  test:           claude-haiku
+  docs:           antigravity
+  architettura:   claude-opus
+
+# Fase 3. Controparte: esecutore dell'altra famiglia, che rivede il diff prima della PR e prende il run
+# quando la quota dell'esecutore è esaurita.
+counterparts: { anthropic: antigravity, google: claude-sonnet }
+# In alternativa (o in più) `fallbacks`: elenco ordinato di esecutori da provare quando quello scelto ha la quota
+# esaurita o la CLI non è installata; chiave = nome dell'esecutore o famiglia, vince l'esecutore. Il revisore
+# è il primo dell'elenco di un'altra famiglia. Esempio: fallbacks: { anthropic: [antigravity, claude-haiku] }
+review:
+  fix_rounds: 1             # se la review trova problemi gravi l'esecutore li corregge una volta
+  timeout_minutes: 15       # oltre, la PR si apre lo stesso con la nota "review non eseguita"
+# "vai N piano" (o plan_first: true nel progetto): prima un run di sola lettura che scrive il piano, poi
+# approva N / modifica N <testo> / scarta N da Telegram.
+plan:
+  timeout_minutes: 15
+outcomes:
+  check_minutes: 10         # ogni quanto jarvis guarda le PR aperte dai run (merge, chiusura, submodule)
+
+# Chiavi opzionali di ogni progetto:
+#   base_branch: branch da cui parte il worktree e verso cui punta la PR draft (default: branch di default del repo).
+#                Per un singolo task si cambia con "vai 4 base:<branch>"; "ripara N" riusa la base del run.
+projects:
+  my-app:
+    redact_description: true
+    path: ~/code/my-app
+    sources:
+      jira: [PROJ]
+      github: [acme/my-app]
+    stack: android
+    # --reference: il worktree prende gli oggetti del submodule dal repo principale invece di riscaricarli
+    setup: git submodule update --init --recursive --reference ~/code/my-app/.git/modules/my-lib
+    build: ./gradlew :app:assembleDebug
+    test: ./gradlew formatKotlin :app:testDebugUnitTest
+    copy_files: [local.properties]
+    # path -> progetto. Se l'agente cambia il submodule il runner apre due PR: framework e app con il puntatore.
+    # I task di my-lib girano qui, nel worktree dell'app.
+    submodules: { my-lib: my-lib }
+    agent_notes:
+      - "Changelog: per ogni modulo toccato (app o framework) aggiungi una riga sotto `## [Unreleased]` nel `changelog.md` alla radice del modulo, nel formato `- <id del task> | <descrizione breve>` (es. `- #933 | ...`, `- PROJ-944 | ...`)."
+    override: { feature: claude-sonnet, bugfix: claude-sonnet }
+
+  my-lib:
+    redact_description: true
+    path: ~/code/my-lib
+    sources:
+      github: [acme/my-lib]
+    stack: android
+    build: ./gradlew assembleDebug
+    test: ./gradlew formatKotlin testDebugUnitTest
+    copy_files: [local.properties]
+
+  orbit-classic:
+    path: ~/code/OrbitClassic
+    sources:
+      github: [alex-dev/OrbitClassic]
+    stack: react-native
+    # Il lavoro del redesign vive su `redesign` (RN 0.86), non su master (RN 0.73).
+    base_branch: redesign
+    setup: yarn install --frozen-lockfile
+    # Script del repo (PR "Redesign 00", su `redesign`): solo errori tsc nuovi rispetto al baseline, lint solo
+    # dei file toccati. `npx tsc` e `yarn lint` interi fallirebbero sempre per il debito preesistente.
+    build: ./scripts/check-tsc-baseline.sh
+    test: ./scripts/lint-changed.sh && yarn test
+
+  orbit-next:
+    path: ~/code/OrbitNext
+    sources:
+      github: [alex-dev/orbitnext]
+    stack: nextjs
+    setup: npm ci
+    build: npm run build
+    test: npm run lint
+
+  orbit-be:
+    path: ~/code/orbitBe
+    sources:
+      github: [alex-dev/orbitBe]
+    stack: spring-kotlin
+    setup: (cd frontend && npm ci)
+    build: ./gradlew build
+    test: ./gradlew test
+
+  novainfo:
+    path: ~/code/NovaInfo
+    sources:
+      github: [alex-dev/novainfo]
+    stack: expo
+    setup: npm ci
+    build: npm run build
+    test: npm run lint && npx jest
+    copy_files:
+      - .env.local
+      - android/app/google-services.json
+      - android/app/src/debug/google-services.json
+      - ios/PortalPa/GoogleService-Info.plist
+
+  nova-news-api:
+    path: ~/code/nova-news-api
+    sources:
+      github: [alex-dev/nova-news-api]
+    stack: nextjs
+    setup: npm ci
+    build: npm run build
+    test: npm run lint && npm test
+    copy_files: [.env]
+
+  portalpa-sito:
+    path: ~/code/portalPaSito
+    sources:
+      github: [alex-dev/portalPa]
+    stack: static-firebase
+    build: null
+    test: null
+
+  catch-ball:
+    paused: true              # accantonato (13/10/2026): importato ma mai proposto dal planner
+    path: ~/code/catch-ball
+    workdir: take_ball
+    sources:
+      github: [alex-dev/catch-ball]
+    stack: flutter
+    setup: flutter pub get
+    build: flutter analyze
+    test: flutter test
+    copy_files: [take_ball/android/key.properties, take_ball/android/local.properties]

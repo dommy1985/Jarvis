@@ -1,0 +1,163 @@
+# Vocabolario dei comandi Telegram (it): le parole che l'owner scrive. Il parsing accetta solo le parole del
+# locale scelto (owner.locale); le altre lingue non vengono riconosciute.
+help_words:
+- aiuto
+- help
+- comandi
+- '?'
+- /help
+- /start
+show_words:
+- briefing
+- piano
+- mostra briefing
+- briefing di oggi
+- /briefing
+projects_words:
+- progetti
+- lista progetti
+- elenco progetti
+- i progetti
+- projects
+outcome_words:
+- stats
+- statistiche
+- esiti
+queue_words:
+- coda
+- stato
+- runner
+clear_words:
+- svuota coda
+- annulla coda
+stop_follow:
+- basta
+- basta segui
+- smetti di seguire
+'yes':
+- sì
+- si
+- sí
+- 'yes'
+- esegui
+'no':
+- 'no'
+- annulla
+- lascia stare
+no_prefixes:
+- lascia stare
+confirm:
+- ok
+- ok!
+- okay
+- confermo
+- conferma
+- va bene
+- vai
+skip:
+- salta
+- skip
+- 'no'
+- togli
+- via
+human:
+- io
+- me
+- a mano
+- la faccio io
+skip_all:
+- salta tutto
+- salta tutti
+- salta tutte
+- nessuno
+- niente
+- nessuna
+filler:
+- fai
+- fare
+- falla
+- fallo
+- fa
+- con
+- a
+- da
+- usa
+- usando
+- assegna
+- assegnala
+- dai
+- dalla
+- dallo
+- lo
+- la
+- per
+- il
+- ticket
+- issue
+- task
+- aggiungi
+- anche
+- e
+focus_all:
+- tutti
+- tutto
+- tutte
+- libero
+- ovunque
+- nessuno
+- tutti i progetti
+hours_word:
+- ore
+briefing_word:
+- briefing
+focus_preps:
+- su
+- per
+- solo
+and_word:
+- e
+weekdays:
+- lun
+- mar
+- mer
+- gio
+- ven
+- sab
+- dom
+go_verbs:
+- vai
+- lancia
+- parti
+all_words:
+- tutti
+- tutto
+- tutte
+with_word:
+- con
+base_word:
+- base
+plan_word:
+- piano
+the_word:
+- il
+run_word:
+- run
+approve_verbs:
+- approva
+discard_verbs:
+- scarta
+revise_verbs:
+- modifica
+log_words:
+- log
+follow_words:
+- segui
+- follow
+repair_verbs:
+- ripara
+- riprendi
+- sistema
+stop_verbs:
+- ferma
+- stop
+- interrompi

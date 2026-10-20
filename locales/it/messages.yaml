@@ -1,0 +1,474 @@
+# Messaggi di Jarvis (it). Chiave -> testo con segnaposto {nome} (str.format). I tag HTML sono quelli di Telegram.
+# Stessa lista di chiavi in ogni locale (tests/test_i18n.py controlla chiavi e segnaposto).
+fmt.day_month: '%d/%m'
+fmt.day_time: '%d/%m %H:%M'
+fmt.time_day: '%H:%M %d/%m'
+fmt.date_full: '%d/%m/%Y'
+err.unknown_executor: 'esecutore sconosciuto: «{name}»'
+err.no_item: non c'è la voce {position}
+api.bad_date: date non valida, formato YYYY-MM-DD
+api.no_briefing: nessun briefing per {date}
+api.too_large: payload troppo grande
+api.expected_object: atteso un oggetto JSON
+api.bad_plan_args: date o available_hours non validi
+api.need_date_message: servono date (YYYY-MM-DD) e message_id
+api.nothing_to_send: nessun briefing da inviare per {date}
+api.telegram_unconfigured: TELEGRAM_JARVIS_CHAT_ID/THREAD_ID/OWNER_ID non configurati
+api.need_chat: servono chat_id, from_id, message_id
+api.runner_token_missing: JARVIS_RUNNER_TOKEN non configurato
+server.internal_error: |-
+  ⚠️ Errore interno di Jarvis: {error}
+  Controlla <code>docker logs jarvis</code>.
+server.warn: ⚠️ {error}.
+server.warn_nothing_queued: ⚠️ {error}. Niente in coda.
+server.warn_no_change: |-
+  ⚠️ {error}. Nessuna modifica.
+  {help}
+server.cleared: |+
+  ⏹ Tolti dalla coda: {count}.
+
+server.not_following_idle: 'Il run non è in corso: niente da seguire.'
+server.no_direct_messages: '⚠️ Messaggi diretti non configurati (TELEGRAM_JARVIS_BOT_TOKEN): uso <code>log</code>.'
+server.follow_footer: <i>Si aggiorna da solo; <code>basta</code> per smettere.</i>
+server.stopped_following: Ok, non seguo più il run {runs}.
+server.not_following: Non stai seguendo nessun run.
+server.no_valid_briefing: Nessun briefing valido per oggi.
+server.err.already_active: '{ref} è già in coda o in corso'
+server.queued_plan: |+
+  🚀 In coda: {done}.
+  Il runner prepara il piano (sola lettura) e te lo mando qui: poi <code>approva N</code>, <code>modifica N &lt;testo&gt;</code> o <code>scarta N</code>.
+
+server.queued: |+
+  🚀 In coda: {done}.
+  Il runner sul Mac le prende una alla volta; ti scrivo quando partono e quando la PR draft è pronta.
+
+server.hint_planner_failed: 'Il planner di stamattina è fallito: scrivi <code>briefing</code> per rigenerarlo.'
+server.hint_generate: Scrivi <code>briefing</code> per generarlo.
+server.no_valid_briefing_hint: Nessun briefing valido per oggi. {hint}
+server.applied_confirmed: '✅ {done}. Per farle partire: <code>vai N</code> o <code>vai tutti</code>.'
+server.applied_unconfirmed: '✏️ {done}. Non ancora confermato: scrivi <code>ok</code> quando va bene.'
+server.err.generic: 'errore: {error}'
+server.confused: |-
+  🤔 {error}
+
+  {help}
+server.no_pending_action: Nessuna azione GitHub in attesa di conferma.
+server.cancelled_action: ❌ Annullato, non ho toccato GitHub.
+server.work_hint: 'Per farla lavorare a un agente: <code>vai {ref} sonnet</code>'
+server.planner_failed: |-
+  ⚠️ <b>Briefing non generato</b>: il planner è fallito.
+  <code>{error}</code>
+server.planner_retry: Riprova con <code>ore 3</code>; se fallisce ancora guarda <code>docker logs jarvis</code>.
+server.wrong_topic: 'Questo sembra un comando per me: scrivilo nel topic 🧠 Jarvis, qui non lo eseguo.'
+server.follow_stopped: '⏹ Run #{run_id}: non lo seguo più (<code>log {run_id}</code> per vedere le ultime azioni).'
+server.follow_finished: '<i>Run finito: non lo seguo più.</i>'
+server.follow_hint: <i><code>basta</code> per smettere.</i>
+server.help_briefing: 'Briefing: {commands}'
+server.help_github: 'GitHub: scrivi cosa fare, es. <i>apri issue su other-app: logo nuovo, mettila in Todo</i>.'
+server.checks_failed: 'controlli non riusciti: {error}'
+result.assigned: assegnata a {names}
+result.added_to: aggiunta a {board}
+result.status: stato {status}
+result.github_error: '⚠️ GitHub ha risposto con un errore: {error}'
+result.already_done: '
+
+  Già fatto: {done}'
+result.done: '✅ Fatto: {done}'
+help.full: |-
+  🧠 <b>Comandi Jarvis</b>
+
+  <b>Briefing</b>
+  <code>briefing</code> rimanda il briefing di oggi aggiornato
+  <code>ok</code> conferma · <code>2 haiku</code> cambia esecutore · <code>2 io</code> la fai tu
+  <code>3 salta</code> · <code>salta tutto</code> · <code>ore 4</code> rigenera con 4 ore
+  <code>progetti</code> elenca i progetti su cui operiamo
+  <code>briefing su other-app</code> · <code>ore 3 su my-app e other-app</code> rigenera concentrato su quei progetti, una volta tanto (<code>briefing su tutti</code> li rimette tutti)
+  <code>PROJ-412 agy</code> o <code>&lt;link&gt; sonnet</code> aggiunge un ticket importato
+
+  <b>Esecuzione</b> (runner sul Mac, PR draft)
+  <code>vai 1</code> · <code>vai 1 3</code> · <code>vai tutti</code> mette in coda le voci approvate
+  <code>vai 4 agy</code> cambia esecutore e mette in coda
+  <code>vai 4 base:redesign</code> parte da quel branch e la PR punta lì (default: <code>base_branch</code> del progetto)
+  <code>vai my-app#933 sonnet</code> aggiunge un ticket al briefing e lo mette in coda
+  <code>coda</code> stato dei run · <code>svuota coda</code> toglie quelli non ancora partiti
+  <code>vai 4 piano</code> (anche <code>vai 4 piano agy</code>) prima il piano, poi decidi: <code>approva 12</code> · <code>modifica 12 &lt;testo&gt;</code> · <code>scarta 12</code>
+  <code>log</code> (o <code>log 7</code>) ultime azioni dell'agente · <code>segui</code> le aggiorna da sole, <code>basta</code> per smettere
+  <code>ferma 7</code> (o <code>ferma</code>) interrompe un run · <code>statistiche</code> esiti per esecutore
+  <code>ripara 7</code> (o <code>ripara 7 agy</code>) riprende le PR del run 7: test, correzione, nuova review
+  Se il lavoro tocca my-lib arrivano due PR: framework e app con il submodule aggiornato
+
+  Esecutori: {executors}
+help.github: |-
+  <b>GitHub</b> (anteprima, poi <code>sì</code> o <code>no</code>)
+  <i>apri issue su other-app: logo nuovo, in Todo</i>
+  <i>sposta my-app#933 in In Progress sulla board Sprint 12</i>
+  <i>assegna la 940 di my-app a {owner}</i>
+  <i>clona PROJ-412 su GitHub</i>
+briefing.help_line: 'Comandi: {commands}'
+briefing.help_commands: <code>ok</code> · <code>2 haiku</code> · <code>2 io</code> · <code>3 salta</code> · <code>ore 4</code> · <code>salta tutto</code> · <code>&lt;link ticket&gt; agy</code> · <code>briefing su other-app</code>
+briefing.hours: '{value:g}h'
+briefing.title: '🧠 <b>Briefing {weekday} {date}</b> · {hours} disponibili #jarvis'
+briefing.confirmed_suffix: ' · ✅ confermato'
+briefing.human: io
+briefing.skipped_detail: '    saltata'
+briefing.total: Totale {total} su {available}. 📌 regola di progetto, ✏️ tua modifica.
+briefing.too_long: … briefing troppo lungo, voci successive omesse.
+briefing.all_skipped: tutte le voci saltate
+briefing.item_skipped: '{position} saltata'
+briefing.confirmed: confermato
+briefing.added_by: Aggiunto da {owner} su Telegram.
+briefing.err.ambiguous_ref: '«{ref}» è ambiguo: scrivi owner/repo#numero'
+briefing.err.task_not_found: '{ref} non è tra i task importati (repo o progetto non configurato, o non assegnato a te)'
+briefing.err.task_closed: '{ref} risulta chiuso'
+briefing.err.pick_projects: scrivi su quali progetti concentrare il briefing
+briefing.err.unknown_project: 'progetto sconosciuto: «{word}» (disponibili: {available})'
+briefing.err.ambiguous_project: '«{word}» è ambiguo: {found}'
+briefing.err.paused_project: '{key} è in pausa (paused: true in projects.yaml): il planner non lo propone'
+briefing.err.hours_twice: le ore sono scritte due volte
+briefing.err.hours_out_of_range: 'ore fuori scala: {value}'
+briefing.err.not_understood: non capisco «{part}»
+briefing.err.empty: messaggio vuoto
+briefing.err.hours_alone: '«ore N» va mandato da solo: rigenera il briefing'
+commands.verb.create_issue: Creo un'issue
+commands.verb.add_to_project: Aggiungo alla board
+commands.verb.set_status: Cambio stato
+commands.verb.assign: Assegno
+commands.err.not_understood: Non ho capito cosa fare.
+commands.err.repo_not_writable: 'repo «{repo}» non scrivibile. Repo possibili: {repos}'
+commands.err.title_needed: serve un titolo (max 256 caratteri)
+commands.err.labels: troppe label o label troppo lunghe
+commands.err.issue_number: manca il numero dell'issue
+commands.err.assignees: 'assegnatari non validi: {names}'
+commands.err.assign_to_whom: a chi la assegno?
+commands.err.board_not_found: board {owner}/{number} non trovata
+commands.err.status_not_found: 'stato «{status}» non esiste in {title}: {statuses}'
+commands.err.status_needs_board: per cambiare stato serve la board
+commands.err.which_board: su quale board?
+commands.err.which_status: quale stato?
+commands.preview.head: 🛠 <b>{verb}</b> su {target}
+commands.preview.title: <b>Titolo:</b> {title}
+commands.preview.body: <b>Testo:</b> {body}
+commands.preview.labels: <b>Label:</b> {labels}
+commands.preview.assignees: <b>Assegnata a:</b> {assignees}
+commands.preview.board: <b>Board:</b> {board}
+commands.preview.confirm: Rispondi <code>sì</code> per eseguire, <code>no</code> per annullare (scade tra {minutes} min).
+projects.title: 📂 <b>Progetti</b> · {active} attivi
+projects.title_paused: ', {paused} in pausa'
+projects.focus: '🎯 Briefing di oggi concentrato su: {projects}'
+projects.head: <b>{name}</b> · {stack} · {open} task aperti
+projects.running: ' · {count} run in coda/corso'
+projects.prs: ' · {count} PR aperte'
+projects.runs_in: i task girano nel worktree di {parent}
+projects.includes: include {names}
+projects.base: base {branch}
+projects.plan_first: prima il piano
+projects.no_source: nessuna sorgente
+projects.paused: '⏸ In pausa (importati ma mai proposti): {names}'
+projects.footer: '<i>Da <code>config/projects.yaml</code>. Per un briefing su alcuni: <code>briefing su other-app</code></i>'
+checks.no_ingest: 'Nessun ingest {source} registrato: controlla il workflow jarvis-ingest in n8n.'
+checks.stale_ingest: 'Ultimo ingest {source} riuscito il {last}: task forse non aggiornati (token in n8n scaduto?).'
+checks.token_broken: 'Token GitHub di Jarvis non funziona ({error}): rinnova GITHUB_JARVIS_TOKEN.'
+checks.expired: è scaduto
+checks.expires_today: scade oggi
+checks.expires_in: scade tra {days} giorni
+checks.token_expiring: 'Il token GitHub di Jarvis {when} ({date}): crea un fine-grained e mettilo in GITHUB_JARVIS_TOKEN (vedi docs/GUIDA.md).'
+checks.hint_quota: 'Quota di Claude esaurita: si libera all''orario indicato sopra. Dopo, scrivi <code>briefing</code> e lo rigenero.'
+checks.hint_auth: 'Sembra un problema di autenticazione di Claude: sul Mac <code>claude setup-token</code>, aggiorna CLAUDE_CODE_OAUTH_TOKEN nel .env del VPS, <code>docker compose up -d jarvis</code>, poi scrivi <code>ore 3</code> qui.'
+outcomes.bad_pr_url: 'URL di PR non valido: {url}'
+outcomes.comments_one: '{count} commento di review ({authors})'
+outcomes.comments_many: '{count} commenti di review ({authors})'
+outcomes.ci_red: CI rossa ({names})
+outcomes.submodule_merged: '🔁 PR del submodule mergiata ({pr}): riallineo il submodule nella PR app di {ref} (run #{run_id}).'
+outcomes.propose_repair: |-
+  💬 Run #{run_id}: {ref} · {feedback} sulle PR.
+      Scrivi <code>ripara {run_id}</code> per farli sistemare all'agente sugli stessi branch (poi test e nuova review).
+outcomes.stats_none: 📊 Nessun run negli ultimi {days} giorni.
+outcomes.stats_title: 📊 <b>Esiti ultimi {days} giorni</b>
+outcomes.avg_min: ' · {value} min medi'
+outcomes.avg_s: ' · {value} s medi'
+outcomes.stats_line: '<b>{executor}</b>: {runs} run · {prs} PR ({as_is} così, {changed} con modifiche, {discarded} scartate) · {failed} falliti · {quota} quota · {fixed} corretti dopo review{avg}'
+outcomes.open_prs: 'PR ancora aperte: {count}'
+planner.by_hand: '{owner}, a mano'
+planner.no_tasks: Nessun task aperto ed eligible da proporre oggi{where}.
+planner.no_tasks_in: ' in {projects}'
+planner.err.locked: briefing {date} già {status}
+planner.err.busy: planner già in esecuzione
+runs.item: voce {position}
+runs.err.bad_base: 'nome del branch di base non valido: {base}'
+runs.err.none_approved: nessuna voce approvata da far partire (conferma il briefing con ok)
+runs.err.already_queued: '{where} già in coda'
+runs.err.already_done: '{where} già eseguita'
+runs.err.not_approved: '{where} non approvata: conferma il briefing con ok, o scrivi {position} <esecutore>'
+runs.err.human: '{where} la fai tu: assegnala a un agente ({position} sonnet)'
+runs.err.not_executable: '{where}: esecutore {name} non eseguibile'
+runs.err.project_unavailable: '{where}: progetto non configurato o in pausa'
+runs.planning_first: ' (prima il piano)'
+runs.base_suffix: ' (base {base})'
+runs.err.none_running: nessun run in corso
+runs.err.no_run: 'run #{run_id} inesistente'
+runs.stop_queued: '⏹ Run #{run_id} tolto dalla coda.'
+runs.err.not_running: 'run #{run_id} non è in corso ({status})'
+runs.stop_running: '⏹ Fermo il run #{run_id}: il runner lo interrompe entro un minuto e ti scrivo.'
+runs.err.no_plan_waiting: nessun piano in attesa
+runs.err.many_plans: 'più piani in attesa ({ids}): scrivi il numero'
+runs.err.not_a_plan: 'run #{run_id} non è un piano'
+runs.plan_state.approved: già approvato
+runs.plan_state.revised: già rivisto da un nuovo piano
+runs.plan_state.discarded: scartato
+runs.plan_state.not_ready: non ancora pronto
+runs.err.plan_state: 'il piano #{run_id} è {state}'
+runs.plan_approved: '👍 Piano #{plan_id} approvato: in coda il lavoro con {executor} (run #{run_id}).'
+runs.err.revise_note: 'scrivi cosa vuoi cambiare: modifica N <testo>'
+runs.plan_revised: '✏️ In coda un nuovo piano (run #{run_id}) dal #{plan_id} con la tua nota.'
+runs.plan_discarded: '🗑 Piano #{plan_id} scartato: la voce torna approvata, puoi rilanciarla.'
+runs.err.no_log: nessun run in corso e nessun log recente
+runs.ago_s: '{value} s'
+runs.ago_min: '{value} min'
+runs.log_head: '{icon} <b>Run #{run_id}</b> {ref} · {executor} · {status}'
+runs.since: ' · da {ago}'
+runs.log_empty: Nessuna riga di log (il run è appena partito o non ha ancora fatto azioni).
+runs.err.no_open_prs: 'run #{run_id} non ha PR aperte da riprendere'
+runs.err.repair_queued: 'c''è già un run in coda sulle PR del run #{run_id}'
+runs.err.executor_not_executable: esecutore {name} non eseguibile
+runs.repair_work: build e test, correzione dei test falliti, nuova review
+runs.repair_work_feedback: '{feedback} da sistemare, poi build e test e nuova review'
+runs.repair_queued: '🛠 In coda: riprendo le PR del run #{run_id} con {name} (run #{new_id}): {work}.'
+runs.offline_since: dalle {time}
+runs.never_seen: mai visto
+runs.offline: '⚠️ Runner offline ({when}): Mac spento o runner fermo. I run partono quando torna.'
+runs.stale_error: nessuna notizia dal runner da {hours:g} ore
+notif.who_realign: riallineamento del submodule
+notif.who_repair: '{executor} (riparazione del run #{parent})'
+notif.tests_passed: test ok
+notif.tests_failed: ⚠️ test falliti
+notif.tests_skipped: test non configurati
+notif.plan_reviewing: rivede il piano
+notif.plan_preparing: prepara il piano
+notif.plan_running: |-
+  📝 Run #{run_id}: {ref} {title}
+      {who} {what} (sola lettura: niente viene modificato)
+notif.plan_ready: '📝 <b>Piano</b> · run #{run_id} · {ref} {title} · {who}'
+notif.plan_revised: ' · rivisto'
+notif.plan_empty: (piano vuoto)
+notif.plan_ready_commands: <code>approva {run_id}</code> · <code>modifica {run_id} &lt;testo&gt;</code> · <code>scarta {run_id}</code>
+notif.sub_pr: "\n    PR submodule: {url}"
+notif.repair_done: |-
+  🛠 Run #{run_id}: {ref} {title}
+      PR del run #{parent} riprese
+notif.repair_pr_app: "\n    PR app: {url}\n    {who} · {tests}"
+notif.repair_details: "\n    Dettagli nel commento sulle PR."
+notif.repair_cancelled: |-
+  ⏹ Run #{run_id}: {ref} {title}
+      riparazione fermata in {step}.
+notif.repair_failed: |-
+  ❌ Run #{run_id}: {ref} {title}
+      riparazione fallita in {step}: {error}
+      Le PR restano com'erano: <code>ripara {parent}</code> per riprovare.
+notif.realign_done: |-
+  🔁 Run #{run_id}: {ref} {title}
+      submodule riallineato al merge del framework nella PR app {url} · {tests}
+      Ora la PR app si può rivedere e mergiare.
+notif.realign_failed: |-
+  ❌ Run #{run_id}: {ref} {title}
+      riallineamento del submodule fallito in {step}: {error}
+      Va fatto a mano nella PR app.
+notif.running: |-
+  ▶️ Run #{run_id}: {ref} {title}
+      {who} al lavoro sul Mac
+notif.follows_plan: "\n    Segue il piano #{plan_id} che hai approvato."
+notif.quota_still_out: "\n    Quota di {executor} ancora esaurita: parte la controparte."
+notif.to_fix: "\n    Da sistemare: {feedback}."
+notif.cancelled: |-
+  ⏹ Run #{run_id}: {ref} {title}
+      fermato in {step}. La voce torna approvata.
+notif.pr_open: '✅ Run #{run_id}: {ref} {title}'
+notif.pr_kind_app: app
+notif.pr_kind_draft: draft
+notif.pr_line: "\n    PR {kind}: {url}\n    {who} · {tests}"
+notif.restarted_from: "\n    Ripartito dal run #{parent} per quota esaurita."
+notif.done_by_counterpart: "\n    Fatto dalla controparte: quota di {executor} esaurita."
+notif.merge_order: "\n    Merge: prima il submodule; dopo il merge riallineo io il puntatore nella PR app e ti scrivo."
+notif.failed: |-
+  ❌ Run #{run_id}: {ref} {title}
+      fallito in {step}: {error}
+      La voce torna approvata: puoi rilanciarla.
+notif.quota_retry: "\n    Quota di {who} esaurita: riparte con {executor} (run #{run_id})."
+notif.quota_out: "\n    Quota dell'esecutore esaurita: cambia esecutore o riprova dopo il reset."
+notif.agent_summary: '
+
+
+  <b>Riepilogo dell''agente</b>
+
+  {summary}'
+notif.review_not_run: 'review {who}: non eseguita ({error})'
+notif.review_clean: 'review {who}: nessun problema'
+notif.review_fixed: ', corretti'
+notif.review_summary: 'review {who}: {count} osservazioni, {serious} gravi{fixed}'
+status.title: 🏃 <b>Coda runner</b>
+status.runner_seen: ' · runner visto alle {time}'
+status.runner_never: ' · runner mai visto'
+status.plan_proposed: 'piano da approvare: approva {run_id}'
+status.plan_approved: piano approvato
+status.plan_revised: piano rivisto
+status.plan_discarded: piano scartato
+status.plan: piano
+status.plan_extra: piano · {extra}
+status.empty: Niente in coda e nessun run nelle ultime 24 ore.
+prov.missing_binary: '{binary} non trovato nel PATH'
+prov.timeout: '{name} -p oltre {timeout}s'
+prov.agent_timeout: agente oltre il tempo massimo
+prov.reviewer_timeout: revisore oltre il tempo massimo
+prov.agent_unreadable: 'output non leggibile (exit {code}): {tail}'
+prov.reviewer_unreadable: 'output del revisore non leggibile (exit {code}): {tail}'
+prov.no_review: il revisore non ha restituito la review strutturata
+prov.agy_denied: '
+
+
+  (agy si è fermato su un comando non permesso: {names}{command})'
+prov.copilot_not_logged_in: 'copilot: non autenticato (copilot /login, oppure GH_TOKEN / gh auth login)'
+prov.copilot_no_json: 'copilot -p exit {code}: nessun oggetto JSON nella risposta: {tail}'
+prov.not_conforming: '{name}: risposta non conforme allo schema{retry}: {errors}'
+prov.after_retry: ' anche al secondo tentativo'
+prov.schema_prompt: '
+
+
+  Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo e senza blocchi di codice, conforme a questo JSON Schema:
+
+  {schema}'
+prov.retry_prompt: '
+
+
+  La tua risposta precedente non era valida:
+
+  {errors}
+
+  Rispondi di nuovo solo con il JSON corretto.'
+schema.expected: '{path}: atteso {kinds}, trovato {found}'
+schema.or: ' o '
+schema.enum: '{path}: {value} non è fra i valori ammessi {allowed}'
+schema.minimum: '{path}: {value} è sotto il minimo {limit}'
+schema.maximum: '{path}: {value} è sopra il massimo {limit}'
+schema.missing: '{path}: manca {key}'
+schema.extra: '{path}: campo non previsto {key}'
+marker.repair_comment: 🛠 Riparazione Jarvis
+marker.submodule_comment: PR del submodule `
+runner.unknown_cli: 'cli sconosciuta: {cli}'
+runner.none: nessuno
+runner.commands_skip_permissions: tutti quelli locali che servono al task, lanciati da questa cartella; niente push, `gh`, installazioni globali o modifiche fuori dal worktree
+runner.commands_allowed: 'solo {allowed}. Ogni altro comando viene negato e può interrompere la sessione: non provarli, per leggere e cercare nel codice usa i tuoi strumenti di lettura e ricerca'
+runner.note_submodule: '`{path}` è un submodule (repo separato). Se il task richiede di cambiarlo, modificalo direttamente lì, senza branch né commit: Jarvis apre una PR sul submodule e una sull''app con il puntatore aggiornato. Per il suo codice segui anche le sue regole (`{path}/AGENTS.md`).'
+runner.note_submodule_test: ' Test del submodule: `cd {path} && {test}`.'
+runner.note_focus: 'Il task è del submodule `{focus}`: il fix va lì, l''app si tocca solo se serve ad adattarla.'
+runner.note_submodule_plan: '`{path}` è un submodule (repo separato) e può essere toccato dal lavoro: leggi anche le sue regole (`{path}/AGENTS.md`).'
+runner.tests_passed: passati
+runner.tests_failed: falliti
+runner.tests_skipped: non configurati
+runner.review_retry: '
+
+
+  Il tentativo precedente si è interrotto su un comando di shell negato: non lanciare comandi, usa solo gli strumenti di lettura e ricerca dei file.'
+runner.diff_truncated: '
+
+  [... diff troncato: leggi i file nel worktree ...]'
+runner.failed_tests_head: 'Test falliti:'
+runner.fb.failed_tests: test_falliti
+runner.fb.pr_comments: commenti_pr
+runner.fb.failed_ci: ci_fallita
+runner.fb.author: autore
+runner.fb.file: file
+runner.fb.pr: pr
+runner.fb.text: testo
+runner.fb.check: check
+runner.fb.result: esito
+runner.fb.details: dettagli
+runner.quota_detail: '{bucket} fino a {reset}'
+runner.feed.tests: 🧪 build e test
+runner.feed.review: 🔍 review incrociata con {name}
+runner.feed.agent: 🚀 {name} al lavoro
+runner.feed.fix: 🛠 correzione di test e problemi della review
+runner.feed.push: ⬆️ commit e push
+runner.feed.pr: 📬 apro le PR
+runner.feed.setup: ⚙️ setup
+runner.feed.plan: 📝 {name} prepara il piano (sola lettura)
+runner.err.base_invalid: 'nome del branch di base non valido: {name}'
+runner.err.base_missing: 'branch di base non trovato su origin: {name}'
+runner.err.secrets: 'file che sembrano segreti nel commit: {files}'
+runner.err.pr_create: 'gh pr create exit {code}: {tail}'
+runner.err.setup: '`{command}` exit {code}: {tail}'
+runner.err.submodule_missing: submodule {path} non inizializzato (manca nel setup del progetto?)
+runner.err.not_ready: '{cli} non pronto: {reason}'
+runner.err.quota: 'quota di {cli} esaurita: {detail}'
+runner.err.review_quota: quota di {name} esaurita ({detail})
+runner.err.no_change: 'nessuna modifica: l''agente si è fermato'
+runner.err.branch: 'branch non ammesso: {branch}'
+runner.err.nothing_in_sub: niente da committare in {path} oltre ai file locali
+runner.err.nothing: niente da committare oltre ai file locali
+runner.err.no_plan: l'agente non ha scritto nessun piano
+runner.err.runner: 'errore del runner: {error}'
+runner.note.local_missing: 'file locale non trovato, non copiato: `{label}{name}`'
+runner.note.transient: 'primo tentativo dell''agente fallito per un errore temporaneo: {error}'
+runner.note.reviewer_edited: 'il revisore ha modificato file in `{name}`: modifiche annullate'
+runner.note.fix_failed: 'correzione non riuscita: {error}'
+runner.note.sub_tests: 'test di `{path}` (`{command}`): {result}'
+runner.plan_note_reverted: '
+
+
+  (nota del runner: l''agente aveva modificato file in `{name}`: annullato)'
+runner.fix_after_tests: '## Correzioni dopo i test falliti'
+runner.commit_title_fix: '{id}: correzioni dopo test e review'
+runner.commit_body: 'Run Jarvis #{run_id}, esecutore {executor}.'
+runner.realign_commit_body: 'Merge di {pr}. Run Jarvis #{run_id} (riallineamento del run #{parent}).'
+runner.realign_noop: submodule già sul commit mergiato
+runner.merge_note: 'Ordine di merge: prima la PR del submodule; poi riporta il submodule dell''app sul commit mergiato (con lo squash `{branch}` sparisce) e mergia questa.'
+runner.app_pr_pending: 'PR dell''app con il puntatore aggiornato: segue.'
+runner.app_pr_link: 'PR dell''app con il puntatore aggiornato: {url}'
+runner.sub_pr_link: 'PR del submodule `{path}`: {url}'
+runner.pr.task: 'Task: [{id}]({url}) — {title}'
+runner.pr.executor: 'Esecutore: `{name}` ({model}) · run Jarvis #{run_id}'
+runner.pr.fallback: ' · ripartito con la controparte: quota di `{executor}` esaurita'
+runner.pr.tests_skipped: 'Build e test: non configurati per il progetto.'
+runner.pr.tests: 'Build e test (`{command}`): {result}'
+runner.pr.passed: ✅ passati
+runner.pr.failed: ❌ falliti
+runner.pr.last_lines: <details><summary>Ultime righe</summary>
+runner.pr.summary_head: '## Riepilogo dell''agente'
+runner.pr.no_summary: (nessun riepilogo)
+runner.pr.notes_head: '## Note del runner'
+runner.pr.footer: 'PR draft aperta da Jarvis: da rivedere prima del merge.'
+runner.review.head: '## Review incrociata ({reviewer})'
+runner.review.not_run: 'Non eseguita: {error}'
+runner.review.no_issues: Nessun problema.
+runner.review.fixes_head: '### Correzioni dopo la review'
+runner.review.fix_failed: 'Correzione non riuscita: {error}'
+runner.repair.head: '{marker} (run #{run_id}, esecutore `{executor}`)'
+runner.repair.pushed: Nuovi commit sul branch.
+runner.repair.not_pushed: 'Nessuna modifica necessaria: niente di nuovo sul branch.'
+runner.repair.passed_to_agent: 'Passati all''agente: {count} commenti di review'
+runner.repair.failed_checks: ', check falliti: {checks}'
+runner.repair.tests: 'Build e test: {result}'
+runner.repair.still_failed: ❌ ancora falliti
+config.err.missing_section: 'sezione mancante: {key}'
+config.err.owner_string: owner.{field} deve essere una stringa
+config.err.locale: 'owner.locale sconosciuto: {locale} (disponibili: {available})'
+config.err.timezone: 'owner.timezone sconosciuto: {timezone}'
+config.err.ingest_hours: ingest.hours deve essere [prima ora, ultima ora], 0-23
+config.err.routing: 'routing.{task_type}: esecutore sconosciuto {executor}'
+config.err.section_executor: '{section}.executor deve essere un esecutore con una cli registrata ({clis})'
+config.err.fallback_key: 'fallbacks.{key}: né un esecutore né una famiglia'
+config.err.fallback_list: fallbacks.{key} deve essere un elenco senza ripetizioni
+config.err.fallback_executor: 'fallbacks.{key}: esecutore non eseguibile {executor}'
+config.err.fallback_self: 'fallbacks.{key}: contiene se stesso'
+config.err.counterpart_executor: 'counterparts.{family}: esecutore non eseguibile {executor}'
+config.err.counterpart_family: 'counterparts.{family}: {executor} è della stessa famiglia'
+config.err.project_field: 'projects.{name}: manca {field}'
+config.err.override: 'projects.{name}.override.{task_type}: esecutore sconosciuto {executor}'
+ingest.err.tasks_list: tasks deve essere una lista
+ingest.err.missing_fields: 'tasks[{index}]: campi mancanti {missing}'
+ingest.err.unknown_source: 'tasks[{index}]: source sconosciuta {source}'
+ingest.err.complete_sources: 'complete_sources non valide: {complete}'
+ingest.err.empty_snapshot: 'snapshot vuoto: passa allow_empty=true se è voluto'
+github.err.issue_not_found: issue {repo}#{number} non trovata
+runs.err.update_no_run: run {run_id} inesistente
+runs.err.update_not_running: run {run_id} non è in esecuzione ({status})
+runs.err.bad_status: 'stato non valido: {status}'
+runs.err.bad_step: 'step non valido: {step}'
