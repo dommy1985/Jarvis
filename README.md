@@ -22,7 +22,7 @@ Every morning it collects your open tasks (GitHub issues, optionally Jira), asks
                               └─ git worktree ─► claude | agy | copilot ─► build/test ─► review ─► draft PR
 ```
 
-Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The story behind the project, and why it works the way it does, is in [docs/article.md](docs/article.md).
 
 ## Requirements
 
