@@ -11,7 +11,7 @@ import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from jarvis import providers
+from jarvis import plantext, providers
 from jarvis.briefing import short_ref
 from jarvis.config import Config
 from jarvis.i18n import alternation, get_locale, t, words
@@ -652,7 +652,7 @@ def notification(conn: sqlite3.Connection, run: dict) -> str | None:
         else:
             text = (t("notif.plan_ready", **head, who=who)
                     + (t("notif.plan_revised") if run.get("plan_of") else "") + "\n\n"
-                    + e((run.get("plan_text") or t("notif.plan_empty")).strip())
+                    + plantext.to_telegram_html(run.get("plan_text") or t("notif.plan_empty"))
                     + "\n\n" + t("notif.plan_ready_commands", run_id=run["id"]))
     elif repairing and status != "running":
         subs = json.loads(run.get("sub_pr_urls") or "[]")
