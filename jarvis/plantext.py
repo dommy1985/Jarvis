@@ -5,8 +5,9 @@ import re
 
 LINK = re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)\)")
 CODE = re.compile(r"`([^`\n]+)`")
-# percorsi assoluti del worktree del run (con o senza file://): niente di utile per chi legge
-WORKTREE = re.compile(r"(?:file://)?/(?:[^\s/()\]`]+/)*?worktrees/[^/\s()\]`]+/")
+# Percorsi assoluti del worktree del run (con o senza file://): niente di utile per chi legge. Il lookbehind impedisce
+# di partire dentro un URL (https://host/...), un percorso relativo o `~/...`.
+START = r"(?<![\w:./~-])(?:file://)?"
 BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
 HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$", re.MULTILINE)
 BULLET = re.compile(r"^([ \t]*)[-*•][ \t]+", re.MULTILINE)
@@ -14,7 +15,13 @@ RULE = re.compile(r"^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$", re.MULTILINE)
 TOKEN = re.compile("\x00(\\d+)\x00")
 
 
-def to_telegram_html(text: str) -> str:
+def _worktree_prefix(worktree: str | None) -> re.Pattern:
+    if worktree:  # il worktree di questo run: <progetto>-<id run>
+        return re.compile(START + r"(?:/[^\s/()\]`]+)*/" + re.escape(worktree) + "/")
+    return re.compile(START + r"(?:/[^\s/()\]`]+)*/\.jarvis/worktrees/[^/\s()\]`]+/")
+
+
+def to_telegram_html(text: str, worktree: str | None = None) -> str:
     """Link markdown ai file e percorsi assoluti tolti, **grassetto**, `codice`, titoli ed elenchi puntati nei tag
     HTML di Telegram. Ogni tag sta su una riga sola, così il testo si può spezzare ai fine riga."""
     kept: list[str] = []
@@ -23,7 +30,7 @@ def to_telegram_html(text: str) -> str:
         kept.append(fragment)
         return f"\x00{len(kept) - 1}\x00"
 
-    text = WORKTREE.sub("", text)
+    text = _worktree_prefix(worktree).sub("", text.replace("\x00", ""))
 
     def link(m: re.Match) -> str:
         label, url = m.groups()

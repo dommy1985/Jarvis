@@ -37,3 +37,22 @@ def test_heading_with_bold_does_not_nest_tags_and_every_tag_stays_on_one_line():
 def test_plain_text_and_numbered_lists_are_untouched_apart_from_escaping():
     assert to_telegram_html("1. Tocca app.txt\n2. a & b") == "1. Tocca app.txt\n2. a &amp; b"
     assert to_telegram_html("\n\n\nuno\n\n\n\ndue\n") == "uno\n\ndue"
+
+
+def test_only_the_runs_own_worktree_is_stripped():
+    text = f"vedi {WT}/app/a.kt, ma {WT.replace('my-app-19', 'other-3')}/b.kt resta"
+    out = to_telegram_html(text, "my-app-19")
+    assert out == f"vedi app/a.kt, ma {WT.replace('my-app-19', 'other-3')}/b.kt resta"
+
+
+def test_urls_relative_paths_and_home_paths_are_never_mangled():
+    assert to_telegram_html("https://github.com/x/worktrees/y/z") == "https://github.com/x/worktrees/y/z"
+    assert to_telegram_html("runner/worktrees/abc/f.py") == "runner/worktrees/abc/f.py"
+    assert to_telegram_html("`~/.jarvis/worktrees/key-3/` e ~/.jarvis/worktrees/key-3/x") == (
+        "<code>~/.jarvis/worktrees/key-3/</code> e ~/.jarvis/worktrees/key-3/x")
+    link = to_telegram_html("[doc](https://github.com/x/worktrees/y/z)")
+    assert link == '<a href="https://github.com/x/worktrees/y/z">doc</a>'
+
+
+def test_nul_characters_in_the_model_text_cannot_break_the_tokens():
+    assert to_telegram_html("a \x000\x00 `b`") == "a 0 <code>b</code>"

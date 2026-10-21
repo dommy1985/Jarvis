@@ -652,7 +652,8 @@ def notification(conn: sqlite3.Connection, run: dict) -> str | None:
         else:
             text = (t("notif.plan_ready", **head, who=who)
                     + (t("notif.plan_revised") if run.get("plan_of") else "") + "\n\n"
-                    + plantext.to_telegram_html(run.get("plan_text") or t("notif.plan_empty"))
+                    + plantext.to_telegram_html(run.get("plan_text") or t("notif.plan_empty"),
+                                                   f"{run['project']}-{run['id']}" if run.get("project") else None)
                     + "\n\n" + t("notif.plan_ready_commands", run_id=run["id"]))
     elif repairing and status != "running":
         subs = json.loads(run.get("sub_pr_urls") or "[]")
