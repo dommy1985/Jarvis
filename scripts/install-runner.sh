@@ -31,8 +31,27 @@ case "$OS" in
   *) echo "sistema non supportato: $OS (solo macOS e Linux)"; exit 1 ;;
 esac
 
-remove_launchagent() {  # $1 = label
+# bootout è asincrono: aspetta che il servizio sia davvero scaricato, altrimenti bootstrap fallisce (errore 5).
+unload_launchagent() {  # $1 = label
   launchctl bootout "gui/$(id -u)/$1" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1 || return 0
+    sleep 1
+  done
+  echo "il servizio $1 non si ferma: riprova tra poco"; exit 1
+}
+
+load_launchagent() {  # $1 = label, $2 = plist: qualche tentativo, perché il caricamento può essere ancora in corso
+  for _ in 1 2 3 4 5; do
+    launchctl bootstrap "gui/$(id -u)" "$2" 2>/dev/null && return 0
+    sleep 2
+  done
+  # ultimo tentativo: mostra l'errore vero
+  launchctl bootstrap "gui/$(id -u)" "$2" || { echo "bootstrap di $1 fallito: controlla $2 o riprova"; exit 1; }
+}
+
+remove_launchagent() {  # $1 = label
+  unload_launchagent "$1"
   rm -f "$HOME/Library/LaunchAgents/$1.plist"
 }
 
@@ -73,8 +92,8 @@ if [[ "$OS" == "Darwin" ]]; then
   mkdir -p "$HOME/Library/LaunchAgents" "$(dirname "$LOG")"
   sed -e "s|@LABEL@|$LABEL|g" -e "s|@UV@|$UV|g" -e "s|@REPO@|$REPO|g" -e "s|@LOG@|$LOG|g" "$REPO/runner/jarvis-runner.plist" > "$PLIST"
   [[ -z "$LEGACY_LABEL" || "$LEGACY_LABEL" == "$LABEL" ]] || remove_launchagent "$LEGACY_LABEL"
-  launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$PLIST"
+  unload_launchagent "$LABEL"
+  load_launchagent "$LABEL" "$PLIST"
   echo "runner avviato. Log: tail -f $LOG"
 else
   mkdir -p "$UNIT_DIR"
