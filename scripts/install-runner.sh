@@ -42,11 +42,12 @@ unload_launchagent() {  # $1 = label
 }
 
 load_launchagent() {  # $1 = label, $2 = plist: qualche tentativo, perché il caricamento può essere ancora in corso
-  for attempt in 1 2 3 4 5; do
+  for _ in 1 2 3 4 5; do
     launchctl bootstrap "gui/$(id -u)" "$2" 2>/dev/null && return 0
     sleep 2
   done
-  launchctl bootstrap "gui/$(id -u)" "$2"  # ultimo tentativo: mostra l'errore vero
+  # ultimo tentativo: mostra l'errore vero
+  launchctl bootstrap "gui/$(id -u)" "$2" || { echo "bootstrap di $1 fallito: controlla $2 o riprova"; exit 1; }
 }
 
 remove_launchagent() {  # $1 = label
