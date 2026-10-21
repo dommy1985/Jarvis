@@ -12,4 +12,6 @@ Read the project rules that apply to the files involved (AGENTS.md, CLAUDE.md an
 3. **Tests**: which tests to add or update and how to verify.
 4. **Risks and questions**: side effects, doubtful cases, points {owner} has to decide.
 
+Format: the plan is read on Telegram, on a phone. Plain text, short sentences, every point on a single line (about 150 characters at most). Quote files and symbols in `backticks` with the path relative to the repository root: no markdown links, no absolute paths, no line numbers, no tables or code blocks.
+
 If the task is unclear or not feasible without information you do not have, do not invent: explain what is missing in section 4.
