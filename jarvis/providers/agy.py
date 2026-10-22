@@ -38,6 +38,35 @@ def _error_line(output: str) -> str | None:
     return next((line[10:].strip() for line in output.splitlines() if line.startswith("AGY_ERROR:")), None)
 
 
+WAITING_LINE = re.compile(
+    r"^(?:"
+    r"Waiting(?:\s+for\b.*|\b(?=[.…]))"
+    r"|Sto attendendo\b.*"
+    r"|Sto eseguendo (?:la build|il comando|i test|`|\./|\bgit\b).*"
+    r"|I have launched\b.*and will wait\b.*"
+    r"|I am waiting\b.*"
+    r"|I'll wait\b.*"
+    r")[.…]?$",
+    re.I,
+)
+
+
+def strip_waiting_lines(text: str) -> str:
+    """Rimuove dall'output di agy le righe di notifica di attesa o lancio comandi fuori dai blocchi di codice."""
+    lines: list[str] = []
+    in_code_block = False
+    for line in text.splitlines():
+        trimmed = line.strip()
+        if trimmed.startswith("```"):
+            in_code_block = not in_code_block
+            lines.append(line)
+            continue
+        if in_code_block or len(trimmed) > 300 or not WAITING_LINE.match(trimmed):
+            lines.append(line)
+    cleaned = "\n".join(lines).strip()
+    return cleaned or text.strip()
+
+
 class AgyProvider(Provider):
     name = "agy"
     binary = "agy"
@@ -90,7 +119,7 @@ class AgyProvider(Provider):
         data = last_result(output)
         if error := _error_line(output):
             return "", f"agy: {error[:600]}", bool(QUOTA.search(error))
-        summary = str((data or {}).get("response") or "")
+        summary = strip_waiting_lines(str((data or {}).get("response") or ""))
         denied = (data or {}).get("denied_actions")
         if denied:  # non bloccante: le modifiche fatte restano, build e test li fa il runner
             command = agy_last_command((data or {}).get("conversation_id"))

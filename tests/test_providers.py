@@ -136,6 +136,70 @@ def test_agy_parse_output(tmp_path, monkeypatch):
     assert agy.parse_output(0, json.dumps({"response": "Ok", "conversation_id": "../etc", "denied_actions": [{}]}))[0].endswith("?)")
 
 
+def test_agy_parse_output_drops_waiting_lines_and_preserves_short_final_turn():
+    # Se l'agente ha spiegato il lavoro in un turno e nell'ultimo ha solo detto "Fatto, vedi sopra.",
+    # tutto il contenuto valido viene preservato e solo le righe di attesa vengono eliminate.
+    raw_response = (
+        "Waiting for review completion.\n"
+        "Waiting for task 257 to finish.\n"
+        "### Riepilogo modifiche\n"
+        "Corretto calcolo delle spese escludendo i rimborsi.\n"
+        "Fatto, vedi sopra."
+    )
+    payload = json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": raw_response}})
+    summary, error, limited = agy.parse_output(0, payload)
+    assert error is None and not limited
+    assert summary == "### Riepilogo modifiche\nCorretto calcolo delle spese escludendo i rimborsi.\nFatto, vedi sopra."
+
+
+def test_agy_parse_output_preserves_legitimate_waiting_lines_and_code_blocks():
+    # Frasi legittime che iniziano con parole simili non devono essere cancellate.
+    raw_response = (
+        "Waiting for review completion.\n"
+        "Waiting list now sorted by date.\n"
+        "I have launched the migration on staging, verify it.\n"
+        "Sto eseguendo la migrazione su staging, verificala.\n"
+        "```kotlin\n"
+        "Waiting for review completion.\n"
+        "```"
+    )
+    payload = json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": raw_response}})
+    summary, error, limited = agy.parse_output(0, payload)
+    assert error is None and not limited
+    assert summary == (
+        "Waiting list now sorted by date.\n"
+        "I have launched the migration on staging, verify it.\n"
+        "Sto eseguendo la migrazione su staging, verificala.\n"
+        "```kotlin\n"
+        "Waiting for review completion.\n"
+        "```"
+    )
+
+
+def test_agy_parse_output_fallback_when_only_waiting_lines():
+    # Se per assurdo l'intero output fosse solo un messaggio di attesa, non restituisce stringa vuota.
+    raw_response = "Waiting for review completion."
+    payload = json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": raw_response}})
+    summary, error, limited = agy.parse_output(0, payload)
+    assert error is None and not limited
+    assert summary == "Waiting for review completion."
+
+
+def test_agy_parse_output_real_fixture_with_stream_json():
+    # Fixture estratta fedelmente da una sessione reale agy stream-json (es. run 23 / run 24)
+    raw = (
+        '{"event":"init","init":{"model":"gemini-3.8-flash-high"}}\n'
+        '{"event":"step_update","step_update":{"step_index":1,"step_type":"agent_response","text_delta":"Sto eseguendo `./gradlew formatKotlin`"}}\n'
+        '{"event":"step_update","step_update":{"step_index":2,"step_type":"tool","tool_name":"run_command"}}\n'
+        '{"event":"step_update","step_update":{"step_index":3,"step_type":"agent_response","text_delta":"Waiting for review completion."}}\n'
+        '{"event":"step_update","step_update":{"step_index":4,"step_type":"agent_response","text_delta":"### Riepilogo modifiche\\n- Fix applicato."}}\n'
+        '{"event":"result","result":{"status":"SUCCESS","response":"Sto eseguendo `./gradlew formatKotlin`\\nWaiting for review completion.\\n### Riepilogo modifiche\\n- Fix applicato."}}\n'
+    )
+    summary, error, limited = agy.parse_output(0, raw)
+    assert error is None and not limited
+    assert summary == "### Riepilogo modifiche\n- Fix applicato."
+
+
 def test_agy_parse_review():
     review = {"verdict": "ok", "summary": "s", "issues": []}
     assert agy.parse_review(0, json.dumps({"structured_output": review})) == (review, None, False)
