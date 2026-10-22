@@ -124,6 +124,8 @@ with_word:
 - with
 base_word:
 - base
+note_word:
+- note
 plan_word:
 - plan
 the_word:

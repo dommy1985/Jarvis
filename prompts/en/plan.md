@@ -10,7 +10,7 @@ Read the project rules that apply to the files involved (AGENTS.md, CLAUDE.md an
 1. **Cause / goal**: what happens today and what must change.
 2. **Changes**: bulleted list of files and classes to touch (real paths read in the repo), with what changes in each. If a submodule must be touched, say so.
 3. **Tests**: which tests to add or update and how to verify.
-4. **Risks and questions**: side effects, doubtful cases, points {owner} has to decide.
+4. **Risks and questions**: side effects, doubtful cases, points {owner} has to decide (list each question with a question mark ?).
 
 Format: the plan is read on Telegram, on a phone. Plain text, short sentences, every point on a single line (about 150 characters at most). Quote files and symbols in `backticks` with the path relative to the repository root: no markdown links, no absolute paths, no line numbers, no tables or code blocks.
 

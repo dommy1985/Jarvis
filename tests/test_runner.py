@@ -883,6 +883,17 @@ def test_owner_name_falls_back_when_the_server_does_not_send_it(repo, tmp_path):
     assert "Ada ha approvato questo piano" in runner.build_prompt(j)
 
 
+def test_build_prompt_and_plan_prompt_include_user_note(repo, tmp_path):
+    repo, _ = repo
+    j = job(repo, tmp_path)
+    j["user_note"] = "escludi i rimborsi con importo negativo"
+    prompt = runner.build_prompt(j)
+    assert "- Istruzioni dell'owner: escludi i rimborsi con importo negativo" in prompt
+    j["plan"] = {"timeout_minutes": 15}
+    plan_prompt = runner.plan_prompt(j)
+    assert "- Istruzioni dell'owner: escludi i rimborsi con importo negativo" in plan_prompt
+
+
 def test_agy_may_read_the_submodules_of_the_project_only():
     agy = providers.get("agy")
     assert "git -C lib grep" in agy.allowed_commands([], ["lib"]) and "git -C lib ls-files" in agy.allowed_commands([], ["lib"])

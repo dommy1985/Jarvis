@@ -13,6 +13,25 @@ HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$", re.MULTILINE)
 BULLET = re.compile(r"^([ \t]*)[-*•][ \t]+", re.MULTILINE)
 RULE = re.compile(r"^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$", re.MULTILINE)
 TOKEN = re.compile("\x00(\\d+)\x00")
+QUESTION_SECTION = re.compile(
+    r"(?:^|\n)[ \t]*(?:#{1,6}\s+|\d+\.\s+)?\**\s*(?:rischi\s+e\s+domande|domande|risks\s+and\s+questions|questions)\b[^\n]*\n([\s\S]*?)(?=\n[ \t]*(?:#{1,6}\s+|\d+\.\s+)\**[^\n]+\**|\Z)",
+    re.I,
+)
+
+
+def extract_plan_questions(text: str) -> list[str]:
+    """Estrae le domande o decisioni aperte indicate nella sezione 'Rischi e domande' del piano."""
+    m = QUESTION_SECTION.search(text)
+    if not m:
+        return []
+    questions: list[str] = []
+    for line in m.group(1).splitlines():
+        line = line.strip()
+        if "?" in line:
+            cleaned = re.sub(r"^(?:[-*•]|\d+\.)\s*", "", line).strip()
+            if cleaned and cleaned not in questions:
+                questions.append(cleaned)
+    return questions
 
 
 def _worktree_prefix(worktree: str | None) -> re.Pattern:

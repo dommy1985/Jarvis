@@ -251,7 +251,8 @@ class Handler(BaseHTTPRequestHandler):
                     reply = t("server.warn", error=html.escape(str(e), quote=False))
             return self._send(200, {"message": self.app.message(reply, message_id), "is_briefing": False})
         go = runs.parse_go(text)
-        text_no_base, base = runs.split_base(text)
+        text_no_note, note = runs.split_note(text)
+        text_no_base, base = runs.split_base(text_no_note)
         text_no_base, plan = runs.split_plan(text_no_base)
         word_no_base = " ".join(text_no_base.strip().lower().split()).rstrip(".!")
         if go is None and (m := runs.GO_REF.fullmatch(word_no_base)):
@@ -266,6 +267,8 @@ class Handler(BaseHTTPRequestHandler):
                     go["base"] = base
                 if plan:
                     go["plan"] = True
+                if note:
+                    go["note"] = note
         if go is not None:
             return self._go(message_id, go)
         if self.app.github and (commands.is_yes(word) or commands.is_no(word)):
@@ -379,7 +382,7 @@ class Handler(BaseHTTPRequestHandler):
                         )
                         positions = [position]
                     done = runs.queue(self.app.conn, self.app.cfg, current["id"], positions, executor, go.get("base"),
-                                      plan=go.get("plan", False))
+                                      plan=go.get("plan", False), note=go.get("note"))
                     self.app.conn.execute("COMMIT")
                 except (runs.RunError, briefing.ReplyError) as e:
                     self.app.conn.execute("ROLLBACK")

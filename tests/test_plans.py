@@ -60,6 +60,26 @@ def test_plan_flow_revise_approve(server):  # noqa: F811
     assert "già approvato" in say(url, "approva 2", 10)
 
 
+def test_plan_notification_highlights_questions(server):  # noqa: F811
+    app, notifier, url = server
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1 piano", 2)
+    job = claim(url)
+    plan_with_q = (
+        "1. Causa: fix calcolo\n"
+        "2. Modifiche: app/Foo.kt\n"
+        "3. Test: FooTest.kt\n"
+        "4. **Rischi e domande**:\n"
+        "- Come gestire i rimborsi parziali?\n"
+    )
+    finish_plan(url, job["run_id"], plan=plan_with_q)
+    sent = notifier.sent[-1]
+    assert "❓ <b>Domande e decisioni aperte:</b>" in sent
+    assert "• Come gestire i rimborsi parziali?" in sent
+    assert "<code>modifica 1 &lt;tua risposta&gt;</code>" in sent
+
+
 def test_discard_and_errors(server):  # noqa: F811
     app, notifier, url = server
     post(f"{url}/plan", {})

@@ -1,4 +1,4 @@
-from jarvis.plantext import to_telegram_html
+from jarvis.plantext import extract_plan_questions, to_telegram_html
 
 WT = "/Users/someone/.jarvis/worktrees/my-app-19"
 
@@ -56,3 +56,40 @@ def test_urls_relative_paths_and_home_paths_are_never_mangled():
 
 def test_nul_characters_in_the_model_text_cannot_break_the_tokens():
     assert to_telegram_html("a \x000\x00 `b`") == "a 0 <code>b</code>"
+
+
+def test_extract_plan_questions_finds_questions_in_section_4():
+    plan = (
+        "1. Causa: fix calcolo\n"
+        "2. Modifiche: app/Foo.kt\n"
+        "3. Test: FooTest.kt\n"
+        "4. **Rischi e domande**:\n"
+        "- Come gestire i rimborsi parziali?\n"
+        "- Attenzione alla compatibilità con versioni vecchie.\n"
+        "• Serve aggiornare le release note?\n"
+    )
+    questions = extract_plan_questions(plan)
+    assert questions == [
+        "Come gestire i rimborsi parziali?",
+        "Serve aggiornare le release note?",
+    ]
+
+
+def test_extract_plan_questions_returns_empty_when_no_questions():
+    plan = (
+        "1. Causa: fix calcolo\n"
+        "2. Modifiche: app/Foo.kt\n"
+        "3. Test: FooTest.kt\n"
+        "4. **Rischi e domande**:\n"
+        "- Nessun rischio rilevato.\n"
+    )
+    assert extract_plan_questions(plan) == []
+
+
+def test_extract_plan_questions_returns_empty_when_no_questions_section():
+    plan = (
+        "1. Causa: perché accade? Non è chiaro.\n"
+        "2. Modifiche: app/Foo.kt\n"
+        "3. Test: FooTest.kt\n"
+    )
+    assert extract_plan_questions(plan) == []
