@@ -265,9 +265,10 @@ class Api:
             log.error("esito del run %s salvato in %s, lo rimando appena jarvis risponde", run_id, self.pending)
         return False
 
-    def flush_pending(self) -> None:
+    def flush_pending(self) -> bool:
+        """Consegna gli esiti in sospeso; True se non ne resta nessuno (solo allora il runner può chiedere lavoro)."""
         if not self.pending.exists():
-            return
+            return True
         left = []
         for line in self.pending.read_text().splitlines():
             body = json.loads(line)
@@ -282,6 +283,7 @@ class Api:
             self.pending.write_text("\n".join(left) + "\n")
         else:
             self.pending.unlink()
+        return not left
 
 
 class Tunnel:
@@ -1294,8 +1296,8 @@ def main(argv: list[str] | None = None) -> None:
             job = None
             if tunnel.ensure():
                 try:
-                    api.flush_pending()
-                    job = api.claim()
+                    if api.flush_pending():  # un claim con un esito non consegnato farebbe fallire il run come orfano
+                        job = api.claim()
                 except (urllib.error.URLError, OSError) as e:
                     log.error("claim: %s", e)
             if job:

@@ -115,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
         cfg = self.app.cfg
         with self.app.lock:
             checks.record(self.app.conn, "runner_seen", utc_now())
-            stale = runs.expire_stale(self.app.conn, cfg.runner["stale_hours"])
+            stale = runs.expire_orphaned(self.app.conn) + runs.expire_stale(self.app.conn, cfg.runner["stale_hours"])
             job = runs.claim(self.app.conn, cfg)
         for run_id in stale:
             self.app.notify_run(run_id)
