@@ -199,8 +199,9 @@ def test_yes_with_more_words_confirms_pending(server):
 
 def test_migration_adds_commands_table(tmp_path):
     conn = db.connect(tmp_path / "m.db")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
     conn.execute("SELECT count(*) FROM commands")
+    conn.execute("SELECT owner_note FROM runs")
 
 
 def test_answer_to_question_goes_back_to_interpreter(server):

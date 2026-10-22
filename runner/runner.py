@@ -514,6 +514,8 @@ def build_prompt(job: dict) -> str:
                      + (tr("runner.note_submodule_test", path=sub["path"], test=sub["test"]) if sub.get("test") else ""))
     if job.get("focus"):
         extra.append(tr("runner.note_focus", focus=job["focus"]))
+    if job.get("user_note"):
+        extra.append(tr("runner.user_note", note=job["user_note"]))
     extra += project.get("agent_notes") or []
     suffix = i18n.prompt("task-suffix") if provider.uses_task_suffix else ""
     if job.get("approved_plan"):
@@ -1117,6 +1119,8 @@ def plan_prompt(job: dict) -> str:
         extra.append(tr("runner.note_submodule_plan", path=sub["path"]))
     if job.get("focus"):
         extra.append(tr("runner.note_focus", focus=job["focus"]))
+    if job.get("user_note"):
+        extra.append(tr("runner.user_note", note=job["user_note"]))
     extra += job["project"].get("agent_notes") or []
     prompt = (i18n.prompt("plan").replace("{owner}", owner_name(job)).replace("{extra}", "".join(f"- {line}\n" for line in extra))
               .replace("{task}", json.dumps(task, ensure_ascii=False, indent=1)))

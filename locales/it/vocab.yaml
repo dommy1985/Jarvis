@@ -136,6 +136,9 @@ with_word:
 - con
 base_word:
 - base
+note_word:
+- nota
+- note
 plan_word:
 - piano
 the_word:

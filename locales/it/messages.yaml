@@ -89,6 +89,7 @@ help.full: |-
   <code>vai 1</code> · <code>vai 1 3</code> · <code>vai tutti</code> mette in coda le voci approvate
   <code>vai 4 agy</code> cambia esecutore e mette in coda
   <code>vai 4 base:redesign</code> parte da quel branch e la PR punta lì (default: <code>base_branch</code> del progetto)
+  <code>vai 4 nota: escludi X</code> passa istruzioni o chiarimenti all'agente
   <code>vai my-app#933 sonnet</code> aggiunge un ticket al briefing e lo mette in coda
   <code>coda</code> stato dei run · <code>svuota coda</code> toglie quelli non ancora partiti
   <code>vai 4 piano</code> (anche <code>vai 4 piano agy</code>) prima il piano, poi decidi: <code>approva 12</code> · <code>modifica 12 &lt;testo&gt;</code> · <code>scarta 12</code>
@@ -250,7 +251,9 @@ notif.plan_running: |-
 notif.plan_ready: '📝 <b>Piano</b> · run #{run_id} · {ref} {title} · {who}'
 notif.plan_revised: ' · rivisto'
 notif.plan_empty: (piano vuoto)
+notif.plan_questions_head: "❓ <b>Domande e decisioni aperte:</b>"
 notif.plan_ready_commands: <code>approva {run_id}</code> · <code>modifica {run_id} &lt;testo&gt;</code> · <code>scarta {run_id}</code>
+notif.plan_ready_commands_questions: <code>modifica {run_id} &lt;tua risposta&gt;</code> · <code>approva {run_id}</code> · <code>scarta {run_id}</code>
 notif.sub_pr: "\n    PR submodule: {url}"
 notif.repair_done: |-
   🛠 Run #{run_id}: {ref} {title}
@@ -292,6 +295,10 @@ notif.failed: |-
   ❌ Run #{run_id}: {ref} {title}
       fallito in {step}: {error}
       La voce torna approvata: puoi rilanciarla.
+notif.needs_info: |-
+  ❓ Run #{run_id}: {ref} {title}
+      L'agente non ha modificato file e chiede chiarimenti per procedere.
+notif.needs_info_commands: "Puoi chiarire e riprovare con:\n<code>vai {pos} nota: &lt;chiarimenti&gt;</code> oppure <code>vai {pos} piano</code>"
 notif.quota_retry: "\n    Quota di {who} esaurita: riparte con {executor} (run #{run_id})."
 notif.quota_out: "\n    Quota dell'esecutore esaurita: cambia esecutore o riprova dopo il reset."
 notif.agent_summary: '
@@ -359,6 +366,7 @@ runner.commands_allowed: 'solo {allowed}. Ogni altro comando viene negato e può
 runner.note_submodule: '`{path}` è un submodule (repo separato). Se il task richiede di cambiarlo, modificalo direttamente lì, senza branch né commit: Jarvis apre una PR sul submodule e una sull''app con il puntatore aggiornato. Per il suo codice segui anche le sue regole (`{path}/AGENTS.md`).'
 runner.note_submodule_test: ' Test del submodule: `cd {path} && {test}`.'
 runner.note_focus: 'Il task è del submodule `{focus}`: il fix va lì, l''app si tocca solo se serve ad adattarla.'
+runner.user_note: 'Istruzioni dell''owner: {note}'
 runner.note_submodule_plan: '`{path}` è un submodule (repo separato) e può essere toccato dal lavoro: leggi anche le sue regole (`{path}/AGENTS.md`).'
 runner.tests_passed: passati
 runner.tests_failed: falliti

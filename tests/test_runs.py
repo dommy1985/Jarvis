@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis import config, planner, runs
+from jarvis import config, i18n, planner, runs
 from jarvis.ingest import ingest
 from jarvis.server import App
 
@@ -81,6 +81,125 @@ def test_parse_go_base():
     assert runs.split_base("vai 4") == ("vai 4", None)
     assert runs.valid_base("redesign") and runs.valid_base("release/1.2-x") and runs.valid_base("upgrade/rn-0.86")
     assert not any(runs.valid_base(b) for b in ("-x", "--upload-pack=x", "a..b", "x/", "x.lock", "a b", ""))
+
+
+def test_parse_go_note():
+    assert runs.split_note("vai 4") == ("vai 4", None)
+    assert runs.split_note("vai 4 nota: escludi i rimborsi") == ("vai 4", "escludi i rimborsi")
+    assert runs.split_note("vai 4 note: exclude refunds") == ("vai 4", "exclude refunds")
+    assert runs.split_note("vai 4 nota: prima riga\nseconda riga") == ("vai 4", "prima riga\nseconda riga")
+    assert runs.parse_go("vai 4 nota: escludi rimborsi") == {"positions": [4], "executor": None, "note": "escludi rimborsi"}
+    assert runs.parse_go("vai 4 nota: riga 1\nriga 2") == {"positions": [4], "executor": None, "note": "riga 1\nriga 2"}
+    assert runs.parse_go("vai 4 agy base:develop note: v2 API") == {
+        "positions": [4], "executor": "agy", "base": "develop", "note": "v2 API"
+    }
+
+
+def test_go_with_note_passes_user_note_to_runner(server):
+    app, notifier, url = server
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1 nota: gestire solo rimborsi positivi", 2)
+    row = app.conn.execute("SELECT owner_note, plan_note FROM runs WHERE id = 1").fetchone()
+    assert row["owner_note"] == "gestire solo rimborsi positivi" and row["plan_note"] is None
+    job = post(f"{url}/runner/claim", {}, token="rt")["run"]
+    assert job["user_note"] == "gestire solo rimborsi positivi"
+
+
+def test_note_propagates_through_approve_and_revise(server):
+    app, notifier, url = server
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1 piano nota: priorità a backward compat", 2)
+
+    # 1. Il plan run riceve owner_note in user_note
+    job1 = post(f"{url}/runner/claim", {}, token="rt")["run"]
+    assert job1["kind"] == "plan"
+    assert job1["user_note"] == "priorità a backward compat"
+    assert "note" not in job1["plan"]  # non è una revisione
+
+    # Simula completamento del piano
+    post(f"{url}/runner/update", {"run_id": 1, "status": "done", "step": "agent", "plan": "Piano bozza"}, token="rt")
+
+    # 2. Revisione: modifica 1 <testo>
+    say(url, "modifica 1 aggiungi gestione errori", 3)
+    row2 = app.conn.execute("SELECT owner_note, plan_note FROM runs WHERE id = 2").fetchone()
+    assert row2["owner_note"] == "priorità a backward compat"
+    assert row2["plan_note"] == "aggiungi gestione errori"
+
+    job2 = post(f"{url}/runner/claim", {}, token="rt")["run"]
+    assert job2["user_note"] == "priorità a backward compat"
+    assert job2["plan"]["note"] == "aggiungi gestione errori"  # nessun raddoppio tra owner_note e plan_note!
+
+    post(f"{url}/runner/update", {"run_id": 2, "status": "done", "step": "agent", "plan": "Piano v2"}, token="rt")
+
+    # 3. Approvazione: approva 2 -> parte il run agent con owner_note preservato
+    say(url, "approva 2", 4)
+    row3 = app.conn.execute("SELECT owner_note, plan_of FROM runs WHERE id = 3").fetchone()
+    assert row3["owner_note"] == "priorità a backward compat"
+    assert row3["plan_of"] == 2
+
+    job3 = post(f"{url}/runner/claim", {}, token="rt")["run"]
+    assert job3["kind"] == "agent"
+    assert job3["user_note"] == "priorità a backward compat"
+    assert job3["approved_plan"] == "Piano v2"
+
+
+def test_note_propagates_on_quota_retry(server):
+    app, notifier, url = server
+    app.cfg.raw["fallbacks"] = {"claude-sonnet": ["antigravity"]}
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1 nota: attenzione ai timeout", 2)
+    job = post(f"{url}/runner/claim", {}, token="rt")["run"]
+    assert job["user_note"] == "attenzione ai timeout"
+
+    # Simula rate limit failure
+    post(f"{url}/runner/update", {"run_id": 1, "status": "failed", "step": "agent", "rate_limited": True,
+                                  "error": "rate limit"}, token="rt")
+    row2 = app.conn.execute("SELECT id, executor, owner_note FROM runs WHERE parent_run_id = 1").fetchone()
+    assert row2 is not None and row2["owner_note"] == "attenzione ai timeout"
+    job2 = post(f"{url}/runner/claim", {}, token="rt")["run"]
+    assert job2["user_note"] == "attenzione ai timeout"
+
+
+def test_needs_info_notification_strict_matching(server):
+    app, notifier, url = server
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1", 2)
+    post(f"{url}/runner/claim", {}, token="rt")
+
+    # 1. Fallimento agente con messaggio esatto no_change e summary -> notif.needs_info con hint comandi
+    post(f"{url}/runner/update", {
+        "run_id": 1, "status": "failed", "step": "agent",
+        "error": i18n.messages("it")["runner.err.no_change"],
+        "summary": "Quale formato di risposta dobbiamo supportare?"
+    }, token="rt")
+    sent = notifier.sent[-1]
+    assert "❓ Run #1" in sent
+    assert "Quale formato di risposta dobbiamo supportare?" in sent
+    assert "vai 1 nota: &lt;chiarimenti&gt;" in sent
+
+    # 2. Errore git contenente 'no changes' ma non errore no_change -> normale notif.failed
+    say(url, "vai 1", 3)
+    post(f"{url}/runner/claim", {}, token="rt")
+    post(f"{url}/runner/update", {
+        "run_id": 2, "status": "failed", "step": "agent",
+        "error": "git commit failed: no changes added to commit (use 'git add')",
+        "summary": "tentativo fallito"
+    }, token="rt")
+    sent2 = notifier.sent[-1]
+    assert "❌ Run #2" in sent2
+    assert "❓ Run #2" not in sent2
+
+    # 3. Senza briefing item associato: notif.needs_info non include il suggerimento comandi con posizione errata
+    app.conn.execute("UPDATE runs SET briefing_item_id = NULL WHERE id = 1")
+    app.conn.execute("UPDATE runs SET notified_status = NULL WHERE id = 1")
+    run1 = app.conn.execute("SELECT * FROM runs WHERE id = 1").fetchone()
+    notif_text = runs.notification(app.conn, dict(run1))
+    assert "❓ Run #1" in notif_text
+    assert "vai 1 nota:" not in notif_text
 
 
 def test_base_branch_override_default_and_repair(server):

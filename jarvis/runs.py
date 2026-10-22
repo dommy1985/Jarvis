@@ -14,14 +14,14 @@ from datetime import datetime, timedelta, timezone
 from jarvis import plantext, providers
 from jarvis.briefing import short_ref
 from jarvis.config import Config
-from jarvis.i18n import alternation, get_locale, t, words
+from jarvis.i18n import alternation, get_locale, messages, t, words
 from jarvis.outcomes import feedback_line
 
 BASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 LOG_KEEP_DAYS = 7
 LOG_PER_RUN = 300
 RUNNER_OFFLINE_MINUTES = 3  # il runner chiede lavoro ogni minuto
-PATTERN_NAMES = ("GO", "GO_REF", "BASE", "PLAN_WORD", "APPROVE", "DISCARD", "REVISE", "LOG", "REPAIR", "STOP")
+PATTERN_NAMES = ("GO", "GO_REF", "BASE", "NOTE", "PLAN_WORD", "APPROVE", "DISCARD", "REVISE", "LOG", "REPAIR", "STOP")
 
 
 @functools.lru_cache(maxsize=None)
@@ -36,6 +36,7 @@ def _patterns(locale: str) -> dict:
                          + executor),
         "GO_REF": re.compile(rf"(?:{go})\s+(.+)"),  # "vai my-lib#12 sonnet"
         "BASE": re.compile(rf"(?:^|\s)(?:{alternation('base_word')})\s*[:=]\s*(\S+)", re.IGNORECASE),  # "vai 4 agy base:redesign"
+        "NOTE": re.compile(rf"(?:^|\s)(?:{alternation('note_word')})\s*[:=]\s*(.+)$", re.IGNORECASE | re.DOTALL),  # "vai 4 nota: escludi X"
         "PLAN_WORD": re.compile(rf"(?:^|\s)(?:{plan})(?=\s|$)", re.IGNORECASE),  # "vai 4 piano agy"
         "APPROVE": re.compile(rf"(?:{alternation('approve_verbs')}){ref}"),
         "DISCARD": re.compile(rf"(?:{alternation('discard_verbs')}){ref}"),
@@ -76,6 +77,14 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat(timespec="seconds")
 
 
+def split_note(text: str) -> tuple[str, str | None]:
+    """"vai 2 nota: escludi i rimborsi" -> ("vai 2", "escludi i rimborsi")."""
+    m = _rx("NOTE").search(text)
+    if m is None:
+        return text, None
+    return text[:m.start()].strip(), m.group(1).strip()
+
+
 def split_base(text: str) -> tuple[str, str | None]:
     """"vai 4 agy base:Redesign" -> ("vai 4 agy", "Redesign"): il nome del branch resta com'è scritto (maiuscole)."""
     m = _rx("BASE").search(text)
@@ -98,7 +107,8 @@ def valid_base(name: str) -> bool:
 def parse_go(text: str) -> dict | None:
     """"vai 1 3" -> {"positions": [1, 3], "executor": None}; "vai tutti" -> positions []; "vai 4 agy" ->
     executor "agy" (nome scritto dall'owner, da risolvere con gli alias). "vai 4 base:redesign" aggiunge
-    "base" (override del branch di base, solo se indicato). None se non è un comando di avvio."""
+    "base" (override del branch di base, solo se indicato). "vai 4 nota:..." aggiunge "note". None se non è un comando di avvio."""
+    text, note = split_note(text)
     text, base = split_base(text)
     text, plan = split_plan(text)
     m = _rx("GO").fullmatch(" ".join(text.strip().lower().split()).rstrip(".!"))
@@ -110,14 +120,17 @@ def parse_go(text: str) -> dict | None:
         go["base"] = base
     if plan:
         go["plan"] = True
+    if note:
+        go["note"] = note
     return go
 
 
 def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: list[int],
-          executor: str | None = None, base_branch: str | None = None, plan: bool = False) -> list[str]:
+          executor: str | None = None, base_branch: str | None = None, plan: bool = False,
+          note: str | None = None) -> list[str]:
     """Mette in coda le voci approvate (tutte se positions è vuota), con `executor` e `base_branch` se indicati.
     Con `plan` (o `plan_first` nel progetto) parte prima un run di piano: l'agente non tocca niente, il piano va
-    all'owner e il lavoro parte solo con "approva N". Restituisce le righe di riepilogo."""
+    all'owner e il lavoro parte solo con "approva N". `note` aggiunge eventuali istruzioni dell'owner. Restituisce le righe di riepilogo."""
     if base_branch and not valid_base(base_branch):
         raise RunError(t("runs.err.bad_base", base=base_branch))
     items = {
@@ -162,9 +175,11 @@ def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: li
         name = i["final_executor"] or i["proposed_executor"]
         planning = plan or bool(cfg.projects.get(i["project"], {}).get("plan_first"))
         conn.execute(
-            """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind)
-               VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)""",
-            (i["task_id"], i["id"], name, executors[name]["model"], now, base_branch, "plan" if planning else "agent"),
+            """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind,
+                                 owner_note)
+               VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)""",
+            (i["task_id"], i["id"], name, executors[name]["model"], now, base_branch, "plan" if planning else "agent",
+             note[:2000] if note else None),
         )
         conn.execute(
             """UPDATE briefing_items SET status = 'queued', final_executor = ?,
@@ -221,10 +236,11 @@ def approve_plan(conn: sqlite3.Connection, run_id: int | None) -> str:
     plan = _open_plan(conn, run_id)
     conn.execute("UPDATE runs SET plan_state = 'approved' WHERE id = ?", (plan["id"],))
     cur = conn.execute(
-        """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind, plan_of)
-           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'agent', ?)""",
+        """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind,
+                             plan_of, owner_note)
+           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'agent', ?, ?)""",
         (plan["task_id"], plan["briefing_item_id"], plan["executor"], plan["model"], _iso(_now()),
-         plan["base_branch"], plan["id"]),
+         plan["base_branch"], plan["id"], plan["owner_note"]),
     )
     return t("runs.plan_approved", plan_id=plan["id"], executor=html.escape(plan["executor"]), run_id=cur.lastrowid)
 
@@ -238,10 +254,10 @@ def revise_plan(conn: sqlite3.Connection, run_id: int | None, note: str) -> str:
     conn.execute("UPDATE runs SET plan_state = 'revised' WHERE id = ?", (plan["id"],))
     cur = conn.execute(
         """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind,
-                             plan_of, plan_note)
-           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'plan', ?, ?)""",
+                             plan_of, plan_note, owner_note)
+           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'plan', ?, ?, ?)""",
         (plan["task_id"], plan["briefing_item_id"], plan["executor"], plan["model"], _iso(_now()),
-         plan["base_branch"], plan["id"], note[:2000]),
+         plan["base_branch"], plan["id"], note[:2000], plan["owner_note"]),
     )
     return t("runs.plan_revised", run_id=cur.lastrowid, plan_id=plan["id"])
 
@@ -388,7 +404,7 @@ def claim(conn: sqlite3.Connection, cfg: Config) -> dict | None:
         return None
     row = conn.execute(
         """SELECT r.id, r.executor, r.model, r.kind, r.parent_run_id, r.feedback, r.fallback_from, r.base_branch,
-                  r.plan_of, r.plan_note,
+                  r.plan_of, r.plan_note, r.owner_note,
                   t.source, t.external_id,
                   COALESCE(r.project, t.project) AS project, t.project AS task_project,
                   COALESCE(i.proposed_type, t.type) AS type, t.title, t.description, t.url, t.labels
@@ -437,6 +453,8 @@ def claim(conn: sqlite3.Connection, cfg: Config) -> dict | None:
         "owner": cfg.owner_name,
         "locale": get_locale(),  # il runner scrive prompt, PR e messaggi d'errore in questa lingua
     }
+    if row["owner_note"]:
+        job["user_note"] = row["owner_note"]
     if parent:
         job["focus"] = parent[1]
     if row["kind"] == "realign":  # niente agente: sposta il submodule della PR app sul commit mergiato
@@ -615,10 +633,10 @@ def _fallback(conn: sqlite3.Connection, cfg: Config, run: dict) -> None:
         return
     conn.execute(
         """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, kind, parent_run_id,
-                             base_branch)
-           VALUES (?, ?, ?, ?, 'queued', ?, 'agent', ?, ?)""",
+                             base_branch, owner_note, plan_of)
+           VALUES (?, ?, ?, ?, 'queued', ?, 'agent', ?, ?, ?, ?)""",
         (run["task_id"], run["briefing_item_id"], other, cfg.raw["executors"][other]["model"], _iso(_now()), run["id"],
-         run["base_branch"]),
+         run["base_branch"], run.get("owner_note"), run.get("plan_of")),
     )
     conn.execute("UPDATE briefing_items SET status = 'queued', final_executor = ? WHERE id = ?",
                  (other, run["briefing_item_id"]))
@@ -650,11 +668,18 @@ def notification(conn: sqlite3.Connection, run: dict) -> str | None:
         if status == "running":
             text = t("notif.plan_running", **head, who=who, what=what)
         else:
+            plan_text = run.get("plan_text") or t("notif.plan_empty")
+            questions = plantext.extract_plan_questions(plan_text)
+            q_block = ("\n\n" + t("notif.plan_questions_head") + "\n" + "\n".join(f"• {e(q)}" for q in questions)
+                       if questions else "")
+            cmd_footer = (t("notif.plan_ready_commands_questions", run_id=run["id"]) if questions
+                          else t("notif.plan_ready_commands", run_id=run["id"]))
             text = (t("notif.plan_ready", **head, who=who)
                     + (t("notif.plan_revised") if run.get("plan_of") else "") + "\n\n"
-                    + plantext.to_telegram_html(run.get("plan_text") or t("notif.plan_empty"),
-                                                   f"{run['project']}-{run['id']}" if run.get("project") else None)
-                    + "\n\n" + t("notif.plan_ready_commands", run_id=run["id"]))
+                    + plantext.to_telegram_html(plan_text,
+                                                f"{run['project']}-{run['id']}" if run.get("project") else None)
+                    + q_block
+                    + "\n\n" + cmd_footer)
     elif repairing and status != "running":
         subs = json.loads(run.get("sub_pr_urls") or "[]")
         if status == "done":
@@ -700,15 +725,34 @@ def notification(conn: sqlite3.Connection, run: dict) -> str | None:
         if subs:
             text += t("notif.merge_order")
     else:
-        text = t("notif.failed", **head, step=e(run["step"] or "-"), error=e((run["error"] or "-")[:500]))
-        if run["rate_limit_hits"]:
-            retry = conn.execute("SELECT id, executor FROM runs WHERE parent_run_id = ? AND kind = 'agent'",
-                                 (run["id"],)).fetchone()
-            text += (t("notif.quota_retry", who=who, executor=e(retry["executor"]), run_id=retry["id"])
-                     if retry else t("notif.quota_out"))
-        if run.get("summary"):  # l'agente si è fermato spiegando perché: è il risultato utile del run
+        err = run.get("error") or ""
+        no_change_messages = {
+            messages("it").get("runner.err.no_change"),
+            messages("en").get("runner.err.no_change"),
+        }
+        needs_info = (
+            run.get("step") == "agent"
+            and bool(run.get("summary"))
+            and (err in no_change_messages or err == t("runner.err.no_change"))
+        )
+        if needs_info:
+            item = (conn.execute("SELECT position FROM briefing_items WHERE id = ?", (run["briefing_item_id"],)).fetchone()
+                    if run.get("briefing_item_id") else None)
             summary = run["summary"] if len(run["summary"]) <= 3000 else run["summary"][:3000] + "…"
-            text += t("notif.agent_summary", summary=e(summary))
+            text = (t("notif.needs_info", **head)
+                    + "\n\n" + t("notif.agent_summary", summary=e(summary)))
+            if item:
+                text += "\n\n" + t("notif.needs_info_commands", pos=item["position"])
+        else:
+            text = t("notif.failed", **head, step=e(run["step"] or "-"), error=e(err[:500]))
+            if run["rate_limit_hits"]:
+                retry = conn.execute("SELECT id, executor FROM runs WHERE parent_run_id = ? AND kind = 'agent'",
+                                     (run["id"],)).fetchone()
+                text += (t("notif.quota_retry", who=who, executor=e(retry["executor"]), run_id=retry["id"])
+                         if retry else t("notif.quota_out"))
+            if run.get("summary"):  # l'agente si è fermato spiegando perché: è il risultato utile del run
+                summary = run["summary"] if len(run["summary"]) <= 3000 else run["summary"][:3000] + "…"
+                text += t("notif.agent_summary", summary=e(summary))
     conn.execute("UPDATE runs SET notified_status = ? WHERE id = ?", (status, run["id"]))
     return text
 

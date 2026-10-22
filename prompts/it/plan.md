@@ -10,7 +10,7 @@ Leggi le regole del progetto che valgono per i file coinvolti (AGENTS.md, CLAUDE
 1. **Causa / obiettivo**: cosa succede oggi e cosa deve cambiare.
 2. **Modifiche**: elenco puntato di file e classi da toccare (percorsi veri letti nel repo), con cosa cambia in ciascuno. Se serve toccare un submodule, dillo.
 3. **Test**: quali test aggiungere o aggiornare e come verificare.
-4. **Rischi e domande**: effetti collaterali, casi dubbi, punti su cui {owner} deve decidere.
+4. **Rischi e domande**: effetti collaterali, casi dubbi, punti su cui {owner} deve decidere (elenca ogni domanda con un punto interrogativo ?).
 
 Formato: il piano si legge su Telegram, da telefono. Testo semplice, frasi brevi, ogni punto su una riga sola (circa 150 caratteri al massimo). Cita file e simboli tra `backtick` con il percorso relativo alla radice del repository: niente link markdown, niente percorsi assoluti, niente numeri di riga, niente tabelle né blocchi di codice.
 

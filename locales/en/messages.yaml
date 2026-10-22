@@ -89,6 +89,7 @@ help.full: |-
   <code>go 1</code> · <code>go 1 3</code> · <code>go all</code> queues the approved items
   <code>go 4 agy</code> changes the executor and queues
   <code>go 4 base:redesign</code> starts from that branch and the PR targets it (default: the project's <code>base_branch</code>)
+  <code>go 4 note: exclude X</code> passes instructions or clarifications to the agent
   <code>go my-app#933 sonnet</code> adds a ticket to the briefing and queues it
   <code>queue</code> run status · <code>clear queue</code> removes the ones not started yet
   <code>go 4 plan</code> (also <code>go 4 plan agy</code>) plan first, then you decide: <code>approve 12</code> · <code>revise 12 &lt;text&gt;</code> · <code>discard 12</code>
@@ -250,7 +251,9 @@ notif.plan_running: |-
 notif.plan_ready: '📝 <b>Plan</b> · run #{run_id} · {ref} {title} · {who}'
 notif.plan_revised: ' · revised'
 notif.plan_empty: (empty plan)
+notif.plan_questions_head: "❓ <b>Open questions and decisions:</b>"
 notif.plan_ready_commands: <code>approve {run_id}</code> · <code>revise {run_id} &lt;text&gt;</code> · <code>discard {run_id}</code>
+notif.plan_ready_commands_questions: <code>revise {run_id} &lt;your reply&gt;</code> · <code>approve {run_id}</code> · <code>discard {run_id}</code>
 notif.sub_pr: "\n    Submodule PR: {url}"
 notif.repair_done: |-
   🛠 Run #{run_id}: {ref} {title}
@@ -292,6 +295,10 @@ notif.failed: |-
   ❌ Run #{run_id}: {ref} {title}
       failed in {step}: {error}
       The item is approved again: you can relaunch it.
+notif.needs_info: |-
+  ❓ Run #{run_id}: {ref} {title}
+      The agent made no changes and requested clarification to proceed.
+notif.needs_info_commands: "You can clarify and retry with:\n<code>go {pos} note: &lt;clarification&gt;</code> or <code>go {pos} plan</code>"
 notif.quota_retry: "\n    {who} quota exhausted: restarting with {executor} (run #{run_id})."
 notif.quota_out: "\n    Executor quota exhausted: change executor or retry after the reset."
 notif.agent_summary: '
@@ -359,6 +366,7 @@ runner.commands_allowed: 'only {allowed}. Any other command is denied and may in
 runner.note_submodule: '`{path}` is a submodule (separate repo). If the task requires changing it, edit it directly there, without branches or commits: Jarvis opens a PR on the submodule and one on the app with the updated pointer. For its code also follow its rules (`{path}/AGENTS.md`).'
 runner.note_submodule_test: ' Submodule tests: `cd {path} && {test}`.'
 runner.note_focus: 'The task belongs to the submodule `{focus}`: the fix goes there, touch the app only if needed to adapt it.'
+runner.user_note: 'Owner instructions: {note}'
 runner.note_submodule_plan: '`{path}` is a submodule (separate repo) and may be touched by the work: also read its rules (`{path}/AGENTS.md`).'
 runner.tests_passed: passed
 runner.tests_failed: failed
