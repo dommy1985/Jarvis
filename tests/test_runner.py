@@ -229,8 +229,16 @@ def test_final_update_kept_until_delivered(tmp_path, monkeypatch):
 
     sent = []
     monkeypatch.setattr(api, "_post", lambda path, body: sent.append(body))
-    api.flush_pending()
+    assert api.flush_pending() is True
     assert sent == [{"run_id": 3, "status": "failed", "error": "x"}] and not pending.exists()
+
+
+def test_flush_pending_false_while_outcome_undelivered(tmp_path):
+    pending = tmp_path / "pending.jsonl"
+    api = runner.Api("http://127.0.0.1:9", "t", pending=pending, retry_seconds=0)  # porta chiusa
+    assert api.flush_pending() is True  # niente in sospeso
+    api.update(3, status="failed", error="x")
+    assert api.flush_pending() is False and pending.exists()  # il claim va saltato, o il run risulterebbe orfano
 
 
 def test_agy_denied_command_is_reported(tmp_path, monkeypatch):

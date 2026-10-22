@@ -382,6 +382,15 @@ def clear(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
+def _fail_running(conn: sqlite3.Connection, rows: list[sqlite3.Row], error: str) -> list[int]:
+    """Segna falliti i run indicati; le voci del briefing tornano approvate."""
+    for r in rows:
+        conn.execute("UPDATE runs SET status = 'failed', error = ?, finished_at = ? WHERE id = ?",
+                     (error, _iso(_now()), r["id"]))
+        conn.execute("UPDATE briefing_items SET status = 'approved' WHERE id = ?", (r["briefing_item_id"],))
+    return [r["id"] for r in rows]
+
+
 def expire_stale(conn: sqlite3.Connection, hours: float) -> list[int]:
     """Run in esecuzione senza notizie dal runner da troppo tempo: falliti, la voce torna approvata."""
     limit = _iso(_now() - timedelta(hours=hours))
@@ -389,13 +398,14 @@ def expire_stale(conn: sqlite3.Connection, hours: float) -> list[int]:
         "SELECT id, briefing_item_id FROM runs WHERE status = 'running' AND COALESCE(heartbeat_at, started_at) < ?",
         (limit,),
     ).fetchall()
-    for r in rows:
-        conn.execute(
-            "UPDATE runs SET status = 'failed', error = ?, finished_at = ? WHERE id = ?",
-            (t("runs.stale_error", hours=hours), _iso(_now()), r["id"]),
-        )
-        conn.execute("UPDATE briefing_items SET status = 'approved' WHERE id = ?", (r["briefing_item_id"],))
-    return [r["id"] for r in rows]
+    return _fail_running(conn, rows, t("runs.stale_error", hours=hours))
+
+
+def expire_orphaned(conn: sqlite3.Connection) -> list[int]:
+    """Il runner esegue un run alla volta e chiede lavoro solo quando è libero: se arriva un claim mentre il server
+    ha un run 'running', quel run è orfano (runner riavviato o crollato). Fallito subito, la voce torna approvata."""
+    rows = conn.execute("SELECT id, briefing_item_id FROM runs WHERE status = 'running'").fetchall()
+    return _fail_running(conn, rows, t("runs.orphan_error"))
 
 
 def claim(conn: sqlite3.Connection, cfg: Config) -> dict | None:
@@ -730,6 +740,8 @@ def notification(conn: sqlite3.Connection, run: dict) -> str | None:
             messages("it").get("runner.err.no_change"),
             messages("en").get("runner.err.no_change"),
         }
+        orphaned = err in {messages("it").get("runs.orphan_error"), messages("en").get("runs.orphan_error"),
+                           t("runs.orphan_error")}
         needs_info = (
             run.get("step") == "agent"
             and bool(run.get("summary"))
@@ -743,6 +755,14 @@ def notification(conn: sqlite3.Connection, run: dict) -> str | None:
                     + "\n\n" + t("notif.agent_summary", summary=e(summary)))
             if item:
                 text += "\n\n" + t("notif.needs_info_commands", pos=item["position"])
+        elif orphaned:
+            item = (conn.execute("SELECT position FROM briefing_items WHERE id = ?", (run["briefing_item_id"],)).fetchone()
+                    if run.get("briefing_item_id") else None)
+            text = t("notif.orphaned", **head, step=e(run["step"] or "-"))
+            if run.get("worktree_path"):
+                text += t("notif.orphaned_worktree", path=e(run["worktree_path"]))
+            if item:
+                text += "\n\n" + t("notif.orphaned_commands", pos=item["position"])
         else:
             text = t("notif.failed", **head, step=e(run["step"] or "-"), error=e(err[:500]))
             if run["rate_limit_hits"]:

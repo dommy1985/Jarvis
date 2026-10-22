@@ -202,6 +202,28 @@ def test_needs_info_notification_strict_matching(server):
     assert "vai 1 nota:" not in notif_text
 
 
+def test_orphaned_run_fails_on_next_claim_and_asks_owner(server):
+    app, notifier, url = server
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1", 2)
+    post(f"{url}/runner/claim", {}, token="rt")
+    post(f"{url}/runner/update", {"run_id": 1, "step": "fix", "worktree_path": "/wt/novainfo-1"}, token="rt")
+
+    # il runner si riavvia: chiede lavoro mentre il server ha ancora il run 'running'
+    assert post(f"{url}/runner/claim", {}, token="rt")["run"] is None
+    row = app.conn.execute("SELECT status, error FROM runs WHERE id = 1").fetchone()
+    assert row["status"] == "failed" and row["error"] == i18n.t("runs.orphan_error")
+    sent = notifier.sent[-1]
+    assert "⚠️ Run #1" in sent and "interrotto in fix" in sent
+    assert "/wt/novainfo-1" in sent
+    assert "vai 1 nota: &lt;istruzioni&gt;" in sent
+
+    # la voce è di nuovo approvata e rilanciabile
+    say(url, "vai 1", 3)
+    assert post(f"{url}/runner/claim", {}, token="rt")["run"] is not None
+
+
 def test_base_branch_override_default_and_repair(server):
     app, notifier, url = server
     post(f"{url}/plan", {})
@@ -259,7 +281,7 @@ def test_full_run_flow(server):
     assert (job["branch"], job["executor"]["cli"], job["task"]["description"]) == ("agent/1", "claude", "d1")
     assert job["task"]["type"] == "feature"  # tipo scelto dal planner
     assert job["project"]["name"] == "novainfo" and job["project"]["test"] and job["limits"]["stale_hours"] == 3
-    assert post(f"{url}/runner/claim", {}, token="rt")["run"] is None  # uno alla volta
+    assert runs.claim(app.conn, app.cfg) is None  # uno alla volta
     assert notifier.sent[-1].startswith("▶️ Run #1")
 
     post(f"{url}/runner/update", {"run_id": 1, "step": "agent"}, token="rt")
@@ -300,9 +322,9 @@ def test_stale_run_fails(server):
     say(url, "vai 1", 2)
     post(f"{url}/runner/claim", {}, token="rt")
     app.conn.execute("UPDATE runs SET heartbeat_at = '2020-01-01T00:00:00+00:00'")
-    post(f"{url}/runner/claim", {}, token="rt")
+    assert runs.expire_stale(app.conn, 3) == [1]
     assert app.conn.execute("SELECT status FROM runs WHERE id = 1").fetchone()[0] == "failed"
-    assert "nessuna notizia dal runner" in notifier.sent[-1]
+    assert app.conn.execute("SELECT error FROM runs WHERE id = 1").fetchone()[0] == i18n.t("runs.stale_error", hours=3)
 
 
 def test_runner_routes_disabled_without_token(tmp_path):

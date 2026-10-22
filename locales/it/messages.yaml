@@ -238,6 +238,7 @@ runs.offline_since: dalle {time}
 runs.never_seen: mai visto
 runs.offline: '⚠️ Runner offline ({when}): Mac spento o runner fermo. I run partono quando torna.'
 runs.stale_error: nessuna notizia dal runner da {hours:g} ore
+runs.orphan_error: il runner si è riavviato o interrotto durante il run
 notif.who_realign: riallineamento del submodule
 notif.who_repair: '{executor} (riparazione del run #{parent})'
 notif.tests_passed: test ok
@@ -299,6 +300,11 @@ notif.needs_info: |-
   ❓ Run #{run_id}: {ref} {title}
       L'agente non ha modificato file e chiede chiarimenti per procedere.
 notif.needs_info_commands: "Puoi chiarire e riprovare con:\n<code>vai {pos} nota: &lt;chiarimenti&gt;</code> oppure <code>vai {pos} piano</code>"
+notif.orphaned: |-
+  ⚠️ Run #{run_id}: {ref} {title}
+      interrotto in {step}: il runner si è riavviato.
+notif.orphaned_worktree: "\n    Il lavoro parziale è nel worktree {path}."
+notif.orphaned_commands: "Cosa faccio?\n<code>vai {pos}</code> riparte da zero · <code>vai {pos} nota: &lt;istruzioni&gt;</code> · <code>vai {pos} piano</code>"
 notif.quota_retry: "\n    Quota di {who} esaurita: riparte con {executor} (run #{run_id})."
 notif.quota_out: "\n    Quota dell'esecutore esaurita: cambia esecutore o riprova dopo il reset."
 notif.agent_summary: '

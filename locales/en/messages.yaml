@@ -238,6 +238,7 @@ runs.offline_since: since {time}
 runs.never_seen: never seen
 runs.offline: '⚠️ Runner offline ({when}): machine off or runner stopped. Runs start when it is back.'
 runs.stale_error: no news from the runner for {hours:g} hours
+runs.orphan_error: the runner restarted or stopped during the run
 notif.who_realign: submodule realignment
 notif.who_repair: '{executor} (repair of run #{parent})'
 notif.tests_passed: tests ok
@@ -299,6 +300,11 @@ notif.needs_info: |-
   ❓ Run #{run_id}: {ref} {title}
       The agent made no changes and requested clarification to proceed.
 notif.needs_info_commands: "You can clarify and retry with:\n<code>go {pos} note: &lt;clarification&gt;</code> or <code>go {pos} plan</code>"
+notif.orphaned: |-
+  ⚠️ Run #{run_id}: {ref} {title}
+      interrupted in {step}: the runner restarted.
+notif.orphaned_worktree: "\n    Partial work is in worktree {path}."
+notif.orphaned_commands: "What should I do?\n<code>go {pos}</code> restarts from scratch · <code>go {pos} note: &lt;instructions&gt;</code> · <code>go {pos} plan</code>"
 notif.quota_retry: "\n    {who} quota exhausted: restarting with {executor} (run #{run_id})."
 notif.quota_out: "\n    Executor quota exhausted: change executor or retry after the reset."
 notif.agent_summary: '
