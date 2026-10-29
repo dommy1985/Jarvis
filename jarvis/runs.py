@@ -15,7 +15,6 @@ from datetime import datetime, timedelta, timezone
 from jarvis import plantext, providers
 from jarvis.briefing import short_ref
 from jarvis.config import Config
-from jarvis.github import GitHub
 from jarvis.i18n import alternation, get_locale, messages, t, words
 from jarvis.outcomes import feedback_line
 
