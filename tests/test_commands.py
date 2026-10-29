@@ -270,8 +270,10 @@ def test_tickets_for_clone(tmp_path, cfg):
 def test_close_issue_marks_task_closed(server):
     app, gh, outputs, url = server
     app.conn.execute(
-        """INSERT INTO tasks (source, external_id, container, title, url, source_status, is_open)
-           VALUES ('github', 'alex-dev/catch-ball#12', 'alex-dev/catch-ball', 'Fix bug', 'http://x', 'OPEN', 1)"""
+        """INSERT INTO tasks (source, external_id, title, url, source_status, is_open, content_hash,
+                               first_seen_at, updated_at)
+           VALUES ('github', 'alex-dev/catch-ball#12', 'Fix bug', 'http://x', 'OPEN', 1, 'h',
+                   '2026-10-13T08:00:00+00:00', '2026-10-13T08:00:00+00:00')"""
     )
     outputs.append(raw(action="close_issue", issue_number=12))
     reply(url, "chiudi catch-ball#12", 70)

@@ -360,6 +360,7 @@ class Handler(BaseHTTPRequestHandler):
                 text = t("server.warn_nothing_queued",
                          error=t("err.unknown_executor", name=html.escape(go["executor"], quote=False)))
                 return self._send(200, {"message": self.app.message(text, message_id), "is_briefing": False})
+        to_assign = []
         with self.app.lock:
             current = planner.briefing(self.app.conn, self.app.today())
             if current is None or current["status"] in ("failed", "expired"):
@@ -388,21 +389,21 @@ class Handler(BaseHTTPRequestHandler):
                     self.app.conn.execute("ROLLBACK")
                     text = t("server.warn_nothing_queued", error=html.escape(str(e), quote=False))
                 else:
-                    for repo, num, task_id in to_assign:
-                        if self.app.github and self.app.cfg.owner_github:
-                            try:
-                                self.app.github.add_assignees(repo, num, [self.app.cfg.owner_github])
-                                with self.app.lock:
-                                    self.app.conn.execute("UPDATE tasks SET assignee = ? WHERE id = ?",
-                                                          (self.app.cfg.owner_github, task_id))
-                            except GitHubError as e:
-                                log.warning("impossibile assegnare issue %s#%s a %s: %s", repo, num,
-                                            self.app.cfg.owner_github, e)
                     log.info("in coda: %s", done)
                     planning = any(t("runs.planning_first") in d for d in done)
                     text = (t("server.queued_plan" if planning else "server.queued",
                               done=html.escape(", ".join(done), quote=False))
                             + runs.status_text(self.app.conn, checks.get(self.app.conn, "runner_seen")))
+        # la chiamata a GitHub sta fuori dal lock (non rientrante), che blocca runner e /reply
+        owner = self.app.cfg.owner_github
+        for repo, num, task_id in to_assign if self.app.github and owner else []:
+            try:
+                self.app.github.add_assignees(repo, num, [owner])
+            except GitHubError as e:
+                log.warning("impossibile assegnare issue %s#%s a %s: %s", repo, num, owner, e)
+                continue
+            with self.app.lock:
+                self.app.conn.execute("UPDATE tasks SET assignee = ? WHERE id = ?", (owner, task_id))
         self._send(200, {"message": self.app.message(text, message_id), "is_briefing": False})
 
     def _show_briefing(self, message_id: int):

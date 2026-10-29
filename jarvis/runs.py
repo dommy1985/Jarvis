@@ -195,7 +195,7 @@ def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: li
         if row.get("source") == "github" and not row.get("assignee") and cfg.owner_github:
             external_id = row.get("external_id") or ""
             repo, _, num_str = external_id.partition("#")
-            if repo and num_str.isdigit():
+            if repo in cfg.writable_repos() and num_str.isdigit():
                 to_assign.append((repo, int(num_str), row["task_id"]))
         done.append(f"{i['position']} {short_ref(i['external_id'])} → {name}"
                     + (t("runs.planning_first") if planning else "")

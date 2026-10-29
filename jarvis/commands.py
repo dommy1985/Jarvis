@@ -132,6 +132,8 @@ def validate(cfg: Config, raw: dict, projects: list[dict]) -> dict:
         raise CommandError(t("commands.err.assignees", names=", ".join(assignees)))
     if action == "create_issue" and not assignees and cfg.owner_github:
         assignees = [cfg.owner_github]
+    if action == "close_issue":
+        assignees = []
     if action == "assign" and not assignees:
         raise CommandError(t("commands.err.assign_to_whom"))
     result["assignees"] = assignees

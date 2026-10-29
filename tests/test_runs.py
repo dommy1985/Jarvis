@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from jarvis import config, i18n, planner, runs
+from jarvis.github import GitHubError
 from jarvis.ingest import ingest
 from jarvis.server import App
 
@@ -282,6 +283,51 @@ def test_go_auto_assigns_unassigned_github_task(server):
     assert ("alex-dev/novainfo", 1, ["alex-dev"]) in calls
     row = app.conn.execute("SELECT assignee FROM tasks WHERE external_id = 'alex-dev/novainfo#1'").fetchone()
     assert row["assignee"] == "alex-dev"
+
+
+def _stub_github(app, calls, fail=False):
+    class StubGH:
+        def token_expiration(self):
+            return None
+
+        def add_assignees(self, repo, number, assignees):
+            if fail:
+                raise GitHubError("boom")
+            calls.append((repo, number, assignees))
+
+    app.github = StubGH()
+
+
+def test_go_skips_assign_when_already_assigned(server):
+    app, notifier, url = server
+    calls = []
+    _stub_github(app, calls)
+    app.conn.execute("UPDATE tasks SET assignee = 'someone' WHERE external_id = 'alex-dev/novainfo#1'")
+    post(f"{url}/plan", {})
+    say(url, "ok", 10)
+    say(url, "vai 1", 11)
+    assert calls == []
+
+
+def test_go_queues_even_if_assign_fails(server):
+    app, notifier, url = server
+    _stub_github(app, [], fail=True)
+    post(f"{url}/plan", {})
+    say(url, "ok", 10)
+    assert "In coda" in say(url, "vai 1", 11)
+    row = app.conn.execute("SELECT assignee FROM tasks WHERE external_id = 'alex-dev/novainfo#1'").fetchone()
+    assert row["assignee"] is None
+
+
+def test_go_does_not_assign_on_non_writable_repo(server):
+    app, notifier, url = server
+    calls = []
+    _stub_github(app, calls)
+    app.cfg.raw["commands"]["write_owners"] = ["someone-else"]
+    post(f"{url}/plan", {})
+    say(url, "ok", 10)
+    say(url, "vai 1", 11)
+    assert calls == []
 
 
 def test_full_run_flow(server):
