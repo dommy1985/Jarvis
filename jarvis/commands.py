@@ -16,7 +16,7 @@ from jarvis.config import Config
 from jarvis.github import GitHub, GitHubError
 from jarvis.i18n import t, words
 
-ACTIONS = ("create_issue", "add_to_project", "set_status", "assign")
+ACTIONS = ("create_issue", "add_to_project", "set_status", "assign", "close_issue")
 JIRA_KEY = re.compile(r"\b([A-Za-z][A-Za-z0-9]+-\d+)\b")
 LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 
@@ -130,6 +130,10 @@ def validate(cfg: Config, raw: dict, projects: list[dict]) -> dict:
     assignees = [str(a).strip().lstrip("@") for a in raw.get("assignees") or []]
     if any(not LOGIN.fullmatch(a) for a in assignees) or len(assignees) > 5:
         raise CommandError(t("commands.err.assignees", names=", ".join(assignees)))
+    if action == "create_issue" and not assignees and cfg.owner_github:
+        assignees = [cfg.owner_github]
+    if action == "close_issue":
+        assignees = []
     if action == "assign" and not assignees:
         raise CommandError(t("commands.err.assign_to_whom"))
     result["assignees"] = assignees
@@ -190,6 +194,11 @@ def execute(gh: GitHub, action: dict) -> dict:
             issue = gh.create_issue(repo, action["title"], action["body"], action["labels"], action["assignees"])
             done.update(url=issue["html_url"], number=issue["number"])
             content_id, items = issue["node_id"], []
+        elif action["action"] == "close_issue":
+            closed = gh.close_issue(repo, number)
+            done.update(url=closed.get("html_url") or f"https://github.com/{repo}/issues/{number}",
+                        number=number, closed=True)
+            return done
         else:
             issue = gh.issue(repo, number)
             done["url"] = issue["url"]

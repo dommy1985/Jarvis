@@ -360,6 +360,7 @@ class Handler(BaseHTTPRequestHandler):
                 text = t("server.warn_nothing_queued",
                          error=t("err.unknown_executor", name=html.escape(go["executor"], quote=False)))
                 return self._send(200, {"message": self.app.message(text, message_id), "is_briefing": False})
+        to_assign = []
         with self.app.lock:
             current = planner.briefing(self.app.conn, self.app.today())
             if current is None or current["status"] in ("failed", "expired"):
@@ -381,8 +382,8 @@ class Handler(BaseHTTPRequestHandler):
                             (current["id"], position),
                         )
                         positions = [position]
-                    done = runs.queue(self.app.conn, self.app.cfg, current["id"], positions, executor, go.get("base"),
-                                      plan=go.get("plan", False), note=go.get("note"))
+                    done, to_assign = runs.queue(self.app.conn, self.app.cfg, current["id"], positions, executor, go.get("base"),
+                                                plan=go.get("plan", False), note=go.get("note"))
                     self.app.conn.execute("COMMIT")
                 except (runs.RunError, briefing.ReplyError) as e:
                     self.app.conn.execute("ROLLBACK")
@@ -393,6 +394,16 @@ class Handler(BaseHTTPRequestHandler):
                     text = (t("server.queued_plan" if planning else "server.queued",
                               done=html.escape(", ".join(done), quote=False))
                             + runs.status_text(self.app.conn, checks.get(self.app.conn, "runner_seen")))
+        # la chiamata a GitHub sta fuori dal lock (non rientrante), che blocca runner e /reply
+        owner = self.app.cfg.owner_github
+        for repo, num, task_id in to_assign if self.app.github and owner else []:
+            try:
+                self.app.github.add_assignees(repo, num, [owner])
+            except GitHubError as e:
+                log.warning("impossibile assegnare issue %s#%s a %s: %s", repo, num, owner, e)
+                continue
+            with self.app.lock:
+                self.app.conn.execute("UPDATE tasks SET assignee = ? WHERE id = ?", (owner, task_id))
         self._send(200, {"message": self.app.message(text, message_id), "is_briefing": False})
 
     def _show_briefing(self, message_id: int):
@@ -516,6 +527,12 @@ class Handler(BaseHTTPRequestHandler):
                 commands.finish(self.app.conn, pending["id"], result, error)
                 if task:
                     ingest(self.app.conn, self.app.cfg, {"tasks": [task]}, utc_now())
+                elif pending.get("action") == "close_issue" and not error:
+                    external_id = f"{pending['repo']}#{pending['issue_number']}"
+                    self.app.conn.execute(
+                        "UPDATE tasks SET is_open = 0, closed_at = ? WHERE external_id = ?",
+                        (utc_now(), external_id),
+                    )
             log.info("comando GitHub %s: %s %s", pending["id"], "fallito" if error else "eseguito", result)
             reply = _result_text(pending, result, error)
             if task and self.app.runner_token:
@@ -575,6 +592,8 @@ def _result_text(action: dict, result: dict, error: str | None) -> str:
         lines.append(t("result.added_to", board=e(result["added_to"])))
     if result.get("status"):
         lines.append(t("result.status", status=e(result["status"])))
+    if result.get("closed"):
+        lines.append(t("result.closed"))
     done = " · ".join(lines)
     if error:
         return t("result.github_error", error=e(error)) + (t("result.already_done", done=done) if done else "")

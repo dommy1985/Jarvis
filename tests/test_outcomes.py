@@ -10,6 +10,10 @@ class FakeGitHub:
     def __init__(self):
         self.pulls, self.commits = {}, {}
         self.reviews, self.inline, self.comments, self.checks, self.status = {}, {}, {}, {}, {}
+        self.issues = {}
+
+    def issue(self, repo, number):
+        return self.issues.get(f"{repo}#{number}", {"state": "CLOSED"})
 
     def pull(self, repo, number):
         return self.pulls[f"https://github.com/{repo}/pull/{number}"]
@@ -90,6 +94,18 @@ def test_outcomes_with_changes_and_discarded(server):  # noqa: F811
     gh.pulls[APP_PR] = {"state": "closed", "merged": False}
     outcomes.refresh(app.conn, gh)
     assert app.conn.execute("SELECT pr_outcome FROM runs WHERE id = 1").fetchone()[0] == "discarded"
+
+
+def test_merged_pr_asks_to_close_if_issue_is_open(server):  # noqa: F811
+    app, notifier, url = server
+    framework_run(app, url)
+    gh = FakeGitHub()
+    gh.pulls = {APP_PR: {"state": "closed", "merged": True, "merge_commit_sha": "def"},
+                FW_PR: {"state": "open", "merged": False}}
+    gh.commits[APP_PR] = [{"commit": {"message": "x: y\n\nRun Jarvis #1."}}]
+    gh.issues["acme/my-lib#12"] = {"state": "OPEN"}
+    messages = outcomes.refresh(app.conn, gh)
+    assert any("vuoi chiuderla" in m and "chiudi acme/my-lib#12" in m for m in messages)
 
 
 def test_repair_reopens_the_same_prs(server):  # noqa: F811

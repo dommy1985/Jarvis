@@ -69,6 +69,7 @@ server.checks_failed: 'controlli non riusciti: {error}'
 result.assigned: assegnata a {names}
 result.added_to: aggiunta a {board}
 result.status: stato {status}
+result.closed: chiusa
 result.github_error: '⚠️ GitHub ha risposto con un errore: {error}'
 result.already_done: '
 
@@ -134,6 +135,7 @@ commands.verb.create_issue: Creo un'issue
 commands.verb.add_to_project: Aggiungo alla board
 commands.verb.set_status: Cambio stato
 commands.verb.assign: Assegno
+commands.verb.close_issue: Chiudo l'issue
 commands.err.not_understood: Non ho capito cosa fare.
 commands.err.repo_not_writable: 'repo «{repo}» non scrivibile. Repo possibili: {repos}'
 commands.err.title_needed: serve un titolo (max 256 caratteri)
@@ -180,6 +182,7 @@ outcomes.comments_one: '{count} commento di review ({authors})'
 outcomes.comments_many: '{count} commenti di review ({authors})'
 outcomes.ci_red: CI rossa ({names})
 outcomes.submodule_merged: '🔁 PR del submodule mergiata ({pr}): riallineo il submodule nella PR app di {ref} (run #{run_id}).'
+outcomes.pr_merged_ask_close: '🎉 PR mergiata ({pr}) per {ref}! L''issue risulta ancora aperta: vuoi chiuderla? (scrivi <code>chiudi {repo}#{number}</code>)'
 outcomes.propose_repair: |-
   💬 Run #{run_id}: {ref} · {feedback} sulle PR.
       Scrivi <code>ripara {run_id}</code> per farli sistemare all'agente sugli stessi branch (poi test e nuova review).
