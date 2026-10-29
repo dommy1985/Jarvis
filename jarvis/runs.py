@@ -7,6 +7,7 @@ riportare i progressi (POST /runner/update) attraverso un tunnel SSH verso il VP
 import functools
 import html
 import json
+import logging
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -14,8 +15,11 @@ from datetime import datetime, timedelta, timezone
 from jarvis import plantext, providers
 from jarvis.briefing import short_ref
 from jarvis.config import Config
+from jarvis.github import GitHub
 from jarvis.i18n import alternation, get_locale, messages, t, words
 from jarvis.outcomes import feedback_line
+
+log = logging.getLogger(__name__)
 
 BASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 LOG_KEEP_DAYS = 7
@@ -127,16 +131,17 @@ def parse_go(text: str) -> dict | None:
 
 def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: list[int],
           executor: str | None = None, base_branch: str | None = None, plan: bool = False,
-          note: str | None = None) -> list[str]:
+          note: str | None = None) -> tuple[list[str], list[tuple[str, int, int]]]:
     """Mette in coda le voci approvate (tutte se positions è vuota), con `executor` e `base_branch` se indicati.
     Con `plan` (o `plan_first` nel progetto) parte prima un run di piano: l'agente non tocca niente, il piano va
-    all'owner e il lavoro parte solo con "approva N". `note` aggiunge eventuali istruzioni dell'owner. Restituisce le righe di riepilogo."""
+    all'owner e il lavoro parte solo con "approva N". `note` aggiunge eventuali istruzioni dell'owner.
+    Restituisce le righe di riepilogo e l'elenco di (repo, issue_number, task_id) da assegnare a owner_github."""
     if base_branch and not valid_base(base_branch):
         raise RunError(t("runs.err.bad_base", base=base_branch))
     items = {
         r["position"]: r
         for r in conn.execute(
-            """SELECT i.*, t.external_id, t.project FROM briefing_items i JOIN tasks t ON t.id = i.task_id
+            """SELECT i.*, t.external_id, t.project, t.source, t.assignee FROM briefing_items i JOIN tasks t ON t.id = i.task_id
                WHERE i.briefing_id = ?""",
             (briefing_id,),
         ).fetchall()
@@ -170,7 +175,7 @@ def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: li
         if i["project"] is None or cfg.projects.get(i["project"], {}).get("paused"):
             raise RunError(t("runs.err.project_unavailable", where=where))
 
-    now, done = _iso(_now()), []
+    now, done, to_assign = _iso(_now()), [], []
     for i in chosen:
         name = i["final_executor"] or i["proposed_executor"]
         planning = plan or bool(cfg.projects.get(i["project"], {}).get("plan_first"))
@@ -186,10 +191,16 @@ def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: li
                    decision_source = CASE WHEN ? THEN 'telegram' ELSE decision_source END WHERE id = ?""",
             (name, executor is not None, i["id"]),
         )
+        row = dict(i)
+        if row.get("source") == "github" and not row.get("assignee") and cfg.owner_github:
+            external_id = row.get("external_id") or ""
+            repo, _, num_str = external_id.partition("#")
+            if repo and num_str.isdigit():
+                to_assign.append((repo, int(num_str), row["task_id"]))
         done.append(f"{i['position']} {short_ref(i['external_id'])} → {name}"
                     + (t("runs.planning_first") if planning else "")
                     + (t("runs.base_suffix", base=html.escape(base_branch, quote=False)) if base_branch else ""))
-    return done
+    return done, to_assign
 
 
 def stop(conn: sqlite3.Connection, run_id: int | None) -> str:

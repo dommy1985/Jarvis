@@ -94,6 +94,9 @@ class GitHub:
     def add_assignees(self, repo: str, number: int, assignees: list[str]) -> dict:
         return self._request("POST", f"/repos/{repo}/issues/{number}/assignees", {"assignees": assignees})
 
+    def close_issue(self, repo: str, number: int) -> dict:
+        return self._request("PATCH", f"/repos/{repo}/issues/{number}", {"state": "closed"})
+
     def pull(self, repo: str, number: int) -> dict:
         return self._request("GET", f"/repos/{repo}/pulls/{number}")
 
@@ -124,7 +127,7 @@ class GitHub:
         data = self.graphql(
             """query($owner: String!, $name: String!, $number: Int!) {
                  repository(owner: $owner, name: $name) { issue(number: $number) {
-                   id url title projectItems(first: 20) { nodes { id project { id } } } } } }""",
+                   id url title state projectItems(first: 20) { nodes { id project { id } } } } } }""",
             owner=owner, name=name, number=number,
         )
         issue = (data.get("repository") or {}).get("issue")

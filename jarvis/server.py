@@ -381,13 +381,23 @@ class Handler(BaseHTTPRequestHandler):
                             (current["id"], position),
                         )
                         positions = [position]
-                    done = runs.queue(self.app.conn, self.app.cfg, current["id"], positions, executor, go.get("base"),
-                                      plan=go.get("plan", False), note=go.get("note"))
+                    done, to_assign = runs.queue(self.app.conn, self.app.cfg, current["id"], positions, executor, go.get("base"),
+                                                plan=go.get("plan", False), note=go.get("note"))
                     self.app.conn.execute("COMMIT")
                 except (runs.RunError, briefing.ReplyError) as e:
                     self.app.conn.execute("ROLLBACK")
                     text = t("server.warn_nothing_queued", error=html.escape(str(e), quote=False))
                 else:
+                    for repo, num, task_id in to_assign:
+                        if self.app.github and self.app.cfg.owner_github:
+                            try:
+                                self.app.github.add_assignees(repo, num, [self.app.cfg.owner_github])
+                                with self.app.lock:
+                                    self.app.conn.execute("UPDATE tasks SET assignee = ? WHERE id = ?",
+                                                          (self.app.cfg.owner_github, task_id))
+                            except GitHubError as e:
+                                log.warning("impossibile assegnare issue %s#%s a %s: %s", repo, num,
+                                            self.app.cfg.owner_github, e)
                     log.info("in coda: %s", done)
                     planning = any(t("runs.planning_first") in d for d in done)
                     text = (t("server.queued_plan" if planning else "server.queued",
@@ -516,6 +526,12 @@ class Handler(BaseHTTPRequestHandler):
                 commands.finish(self.app.conn, pending["id"], result, error)
                 if task:
                     ingest(self.app.conn, self.app.cfg, {"tasks": [task]}, utc_now())
+                elif pending.get("action") == "close_issue" and not error:
+                    external_id = f"{pending['repo']}#{pending['issue_number']}"
+                    self.app.conn.execute(
+                        "UPDATE tasks SET is_open = 0, closed_at = ? WHERE external_id = ?",
+                        (utc_now(), external_id),
+                    )
             log.info("comando GitHub %s: %s %s", pending["id"], "fallito" if error else "eseguito", result)
             reply = _result_text(pending, result, error)
             if task and self.app.runner_token:
@@ -575,6 +591,8 @@ def _result_text(action: dict, result: dict, error: str | None) -> str:
         lines.append(t("result.added_to", board=e(result["added_to"])))
     if result.get("status"):
         lines.append(t("result.status", status=e(result["status"])))
+    if result.get("closed"):
+        lines.append(t("result.closed"))
     done = " · ".join(lines)
     if error:
         return t("result.github_error", error=e(error)) + (t("result.already_done", done=done) if done else "")

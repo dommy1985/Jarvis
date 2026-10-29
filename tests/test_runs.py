@@ -264,6 +264,26 @@ def test_repair_of_run_without_base_keeps_the_default_base(server):
     assert (job["kind"], job["base_branch"]) == ("repair", None)  # la PR sta su main: non cambia base
 
 
+def test_go_auto_assigns_unassigned_github_task(server):
+    app, notifier, url = server
+    calls = []
+
+    class StubGH:
+        def token_expiration(self):
+            return None
+
+        def add_assignees(self, repo, number, assignees):
+            calls.append((repo, number, assignees))
+
+    app.github = StubGH()
+    post(f"{url}/plan", {})
+    say(url, "ok", 10)
+    say(url, "vai 1", 11)
+    assert ("alex-dev/novainfo", 1, ["alex-dev"]) in calls
+    row = app.conn.execute("SELECT assignee FROM tasks WHERE external_id = 'alex-dev/novainfo#1'").fetchone()
+    assert row["assignee"] == "alex-dev"
+
+
 def test_full_run_flow(server):
     app, notifier, url = server
     post(f"{url}/plan", {})

@@ -8,7 +8,7 @@ Jarvis proposes, you decide. No irreversible action happens without your approva
 
 - the **planner**: one model call per morning that turns your open tasks into a briefing (what to do, with which executor, how long it needs of your attention). It sees only open, *eligible* tasks and returns JSON that is validated against a schema;
 - the **briefing and command handling**: your Telegram replies (`ok`, `2 haiku`, `hours 4`, `go 3`, `approve 5`, ...) are parsed deterministically, with no model involved;
-- the **GitHub commands**: free-text requests ("open an issue on my-app: new logo") are translated by a model into one of four validated actions (create issue, add to project, set status, assign), previewed, and executed only after you confirm;
+- the **GitHub commands**: free-text requests ("open an issue on my-app: new logo", "close issue on my-app: 12") are translated by a model into validated actions (create issue, add to project, set status, assign, close issue), previewed, and executed only after you confirm; new issues are assigned to the owner by default, and unassigned issues are automatically assigned when queued with "vai";
 - the **queue and dispatcher** (deterministic): runs, fallback between executors, notifications, outcomes of the PRs opened by runs.
 
 **n8n** does what it is good at: ingest from GitHub and Jira on a cron, the morning trigger, and the Telegram webhook that forwards your replies to the server. The workflows are in `n8n/workflows/` (credentials are not exported).
@@ -26,7 +26,7 @@ Jarvis proposes, you decide. No irreversible action happens without your approva
 5. The runner executes; `log` and `follow` show the agent's actions as it works.
 6. Cross-review by the other model family, one fix round, build and tests again.
 7. Draft PR (two linked PRs if the work touches a configured submodule).
-8. The server watches the PR (merged, closed, review comments, red CI) and records the outcome. If a PR gets review comments or fails CI it proposes `repair N`; it never starts on its own.
+8. The server watches the PR (merged, closed, review comments, red CI) and records the outcome. If a PR merges and the linked issue is still open, it asks on Telegram if you want to close it. If a PR gets review comments or fails CI it proposes `repair N`; it never starts on its own.
 
 ## Choosing an executor
 

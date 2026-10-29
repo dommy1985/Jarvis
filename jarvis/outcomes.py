@@ -150,6 +150,17 @@ def refresh(conn: sqlite3.Connection, gh: GitHub) -> list[str]:
         if outcome:
             conn.execute("UPDATE runs SET status = 'done', pr_outcome = ? WHERE id = ?", (outcome, run["id"]))
             log.info("run %s: PR %s -> %s", run["id"], run["pr_url"], outcome)
+            if outcome in ("approved_as_is", "approved_with_changes") and run["external_id"] and "#" in run["external_id"]:
+                repo, _, num_str = run["external_id"].partition("#")
+                if repo and num_str.isdigit():
+                    try:
+                        issue = gh.issue(repo, int(num_str))
+                        if str(issue.get("state") or "").upper() == "OPEN":
+                            ref = html.escape(short_ref(run["external_id"]), quote=False)
+                            pr_link = html.escape(run["pr_url"], quote=False)
+                            messages.append(t("outcomes.pr_merged_ask_close", pr=pr_link, ref=ref, repo=repo, number=int(num_str)))
+                    except GitHubError as e:
+                        log.warning("impossibile verificare stato issue %s: %s", run["external_id"], e)
             continue
         merged = [url for url, s in subs.items() if s["state"] == "merged"]
         already = conn.execute("SELECT 1 FROM runs WHERE parent_run_id = ? AND kind = 'realign'",

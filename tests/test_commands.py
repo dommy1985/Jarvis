@@ -52,6 +52,10 @@ class FakeGitHub:
     def add_assignees(self, repo, number, assignees):
         self._call("add_assignees", repo, number, assignees)
 
+    def close_issue(self, repo, number):
+        self._call("close_issue", repo, number)
+        return {"html_url": f"https://github.com/{repo}/issues/{number}", "number": number, "state": "closed"}
+
     def add_to_project(self, project_id, content_id):
         self._call("add_to_project", project_id, content_id)
         return "ITEM_NEW"
@@ -66,6 +70,22 @@ def test_validate_create_with_board(cfg):
     assert (a["repo"], a["title"], a["status"], a["assignees"]) == (
         "alex-dev/catch-ball", "Logo nuovo", {"name": "Todo", "id": "o1"}, ["alex-dev"])
     assert a["project"]["id"] == "PVT_1"
+
+
+def test_validate_create_default_assignee(cfg):
+    a = commands.validate(cfg, raw(assignees=[]), [BOARD])
+    assert a["assignees"] == ["alex-dev"]
+
+
+def test_validate_and_execute_close_issue(cfg):
+    a = commands.validate(cfg, raw(action="close_issue", issue_number=12), [BOARD])
+    assert a["action"] == "close_issue"
+    assert a["issue_number"] == 12
+    gh = FakeGitHub()
+    res = commands.execute(gh, a)
+    assert res["closed"] is True
+    assert res["number"] == 12
+    assert ("close_issue", "alex-dev/catch-ball", 12) in gh.calls
 
 
 @pytest.mark.parametrize("bad, error", [
@@ -245,3 +265,18 @@ def test_tickets_for_clone(tmp_path, cfg):
                       "github_issues": ["https://github.com/acme/my-app/issues/5"]}]
     text = commands.message(cfg, "clona PROJ-412", [], tickets=found)
     assert '"key": "PROJ-412"' in text and "segreto" not in text  # mai la descrizione del ticket
+
+
+def test_close_issue_marks_task_closed(server):
+    app, gh, outputs, url = server
+    app.conn.execute(
+        """INSERT INTO tasks (source, external_id, container, title, url, source_status, is_open)
+           VALUES ('github', 'alex-dev/catch-ball#12', 'alex-dev/catch-ball', 'Fix bug', 'http://x', 'OPEN', 1)"""
+    )
+    outputs.append(raw(action="close_issue", issue_number=12))
+    reply(url, "chiudi catch-ball#12", 70)
+    res = reply(url, "sì", 71)
+    assert "chiusa" in res["message"]["text"]
+    assert ("close_issue", "alex-dev/catch-ball", 12) in gh.calls
+    row = app.conn.execute("SELECT is_open, closed_at FROM tasks WHERE external_id = 'alex-dev/catch-ball#12'").fetchone()
+    assert row["is_open"] == 0 and row["closed_at"] is not None
