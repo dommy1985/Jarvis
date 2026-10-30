@@ -83,6 +83,21 @@ def test_missing_from_snapshot_closes_and_reappearing_reopens(conn, cfg):
     assert (rows(conn)["PROJ-2"]["is_open"], rows(conn)["PROJ-2"]["closed_at"]) == (1, None)
 
 
+def test_complete_source_with_no_tasks_closes_its_last_ones(conn, cfg):
+    ingest(conn, cfg, payload(jira(), gh()), "t1")
+    counts = ingest(conn, cfg, payload(jira()), "t2")
+    assert counts["closed"] == 1
+    assert rows(conn)["alex-dev/novainfo#31"]["is_open"] == 0
+    assert rows(conn)["PROJ-1"]["is_open"] == 1
+
+
+def test_allow_empty_snapshot_closes_everything(conn, cfg):
+    ingest(conn, cfg, payload(jira(), gh()), "t1")
+    counts = ingest(conn, cfg, {**payload(), "allow_empty": True}, "t2")
+    assert counts["closed"] == 2
+    assert all(r["is_open"] == 0 for r in rows(conn).values())
+
+
 def test_only_complete_sources_are_closed(conn, cfg):
     ingest(conn, cfg, payload(jira(), gh()), "t1")
     ingest(conn, cfg, payload(jira(), complete=["jira"]), "t2")

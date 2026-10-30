@@ -138,10 +138,10 @@ def ingest(conn: sqlite3.Connection, cfg: Config, payload: dict, now: str) -> di
 
         for source in payload.get("complete_sources", []):
             seen = [t["external_id"] for t in tasks if t["source"] == source]
-            placeholders = ",".join("?" * len(seen)) or "NULL"
+            # `NOT IN (NULL)` non è mai vero: con zero task visti niente filtro, si chiude tutto.
+            keep = f" AND external_id NOT IN ({','.join('?' * len(seen))})" if seen else ""
             cur = conn.execute(
-                f"""UPDATE tasks SET is_open = 0, closed_at = ?
-                    WHERE source = ? AND is_open = 1 AND external_id NOT IN ({placeholders})""",
+                f"UPDATE tasks SET is_open = 0, closed_at = ? WHERE source = ? AND is_open = 1{keep}",
                 (now, source, *seen),
             )
             counts["closed"] += cur.rowcount
