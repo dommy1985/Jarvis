@@ -241,6 +241,39 @@ def test_flush_pending_false_while_outcome_undelivered(tmp_path):
     assert api.flush_pending() is False and pending.exists()  # il claim va saltato, o il run risulterebbe orfano
 
 
+def test_flush_pending_skips_unreadable_line(tmp_path, monkeypatch):
+    pending = tmp_path / "pending.jsonl"
+    good = {"run_id": 3, "status": "failed", "error": "x"}
+    pending.write_text(json.dumps(good) + "\n" + '{"run_id": 4, "stat')  # ultima riga troncata
+    api = runner.Api("http://127.0.0.1:9", "t", pending=pending, retry_seconds=0)
+    sent = []
+    monkeypatch.setattr(api, "_post", lambda path, body: sent.append(body))
+    assert api.flush_pending() is True
+    assert sent == [good] and not pending.exists()
+    assert pending.with_suffix(".bad").read_text() == '{"run_id": 4, "stat\n'
+
+
+def test_update_after_torn_line_keeps_new_outcome_readable(tmp_path):
+    pending = tmp_path / "pending.jsonl"
+    pending.write_text('{"run_id": 4, "stat')  # crash a metà append
+    api = runner.Api("http://127.0.0.1:9", "t", pending=pending, retry_seconds=0)
+    api.update(5, status="failed", error="x")
+    assert [l for l in pending.read_text().splitlines()][-1] == json.dumps({"run_id": 5, "status": "failed", "error": "x"})
+
+
+def test_flush_pending_rewrites_leftovers_atomically(tmp_path, monkeypatch):
+    pending = tmp_path / "pending.jsonl"
+    lines = [json.dumps({"run_id": i, "status": "done"}) for i in (1, 2)]
+    pending.write_text("\n".join(lines) + "\n")
+    api = runner.Api("http://127.0.0.1:9", "t", pending=pending, retry_seconds=0)  # porta chiusa
+    replaced = []
+    real = runner.os.replace
+    monkeypatch.setattr(runner.os, "replace", lambda a, b: (replaced.append((a, b)), real(a, b)))
+    assert api.flush_pending() is False
+    assert pending.read_text() == "\n".join(lines) + "\n"
+    assert replaced and not pending.with_suffix(".tmp").exists()
+
+
 def test_agy_denied_command_is_reported(tmp_path, monkeypatch):
     monkeypatch.setattr("jarvis.providers.agy.AGY_CONVERSATIONS", tmp_path)
     (tmp_path / "c-1.db").write_bytes(b'xx{"CommandLine":"git status"}yy{"CommandLine":"adb logcat \\"Tripo\\""}zz')

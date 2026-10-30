@@ -260,8 +260,15 @@ class Api:
                     self.reconnect()
         if final:
             self.pending.parent.mkdir(parents=True, exist_ok=True)
-            with self.pending.open("a") as f:
+            with self.pending.open("a+") as f:
+                f.seek(0, os.SEEK_END)
+                if f.tell():  # riga troncata da un crash: senza a capo il nuovo esito le si incollerebbe
+                    f.seek(f.tell() - 1)
+                    if f.read(1) != "\n":
+                        f.write("\n")
                 f.write(json.dumps(body) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
             log.error("esito del run %s salvato in %s, lo rimando appena jarvis risponde", run_id, self.pending)
         return False
 
@@ -271,7 +278,16 @@ class Api:
             return True
         left = []
         for line in self.pending.read_text().splitlines():
-            body = json.loads(line)
+            if not line.strip():
+                continue
+            try:
+                body = json.loads(line)
+                body["run_id"]
+            except (ValueError, KeyError, TypeError):  # riga troncata (crash durante l'append): non deve bloccare il runner
+                log.error("riga illeggibile in %s, la sposto in %s", self.pending, self.pending.with_suffix(".bad"))
+                with self.pending.with_suffix(".bad").open("a") as bad:
+                    bad.write(line + "\n")
+                continue
             try:
                 self._post("/runner/update", body)
                 log.info("esito del run %s consegnato", body["run_id"])
@@ -280,7 +296,12 @@ class Api:
             except (urllib.error.URLError, OSError):
                 left.append(line)
         if left:
-            self.pending.write_text("\n".join(left) + "\n")
+            tmp = self.pending.with_suffix(".tmp")
+            with tmp.open("w") as f:
+                f.write("\n".join(left) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.pending)  # un crash lascia il file vecchio o il nuovo, mai uno a metà
         else:
             self.pending.unlink()
         return not left
