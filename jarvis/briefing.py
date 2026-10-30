@@ -4,7 +4,9 @@ Risposte riconosciute (più comandi anche sulla stessa riga: "1 sonnet 2 io ok")
   ok              conferma le voci proposte
   2 haiku         cambia l'esecutore della voce 2 (nomi o alias da projects.yaml)
   2 io            la voce 2 la fa l'owner
-  2 salta         toglie la voce 2
+  2 salta         toglie la voce 2: al suo posto arriva la prima riserva del planner e il task non viene
+                  riproposto per planner.skip_snooze_days giorni
+  2 mai           come salta, ma il task non viene più proposto (finché non lo aggiungi a mano)
   ore 4           rigenera il briefing con 4 ore disponibili (da solo; tiene il focus di oggi, se c'è)
   ore 3 su other-app e my-app
                   rigenera concentrato su quei progetti (una volta tanto: domani si torna al normale);
@@ -23,7 +25,7 @@ import json
 import re
 import sqlite3
 from datetime import date as Date
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from jarvis.config import Config
 from jarvis.i18n import alternation, get_locale, t, words
@@ -207,6 +209,9 @@ def parse(text: str, cfg: Config) -> list[dict]:
             if rest in words("skip"):
                 commands.append({"cmd": "skip", "position": position})
                 continue
+            if rest in words("never"):
+                commands.append({"cmd": "never", "position": position})
+                continue
             executor = names.get(rest) or names.get(rest.replace(" ", "-"))
             if executor:
                 commands.append({"cmd": "executor", "position": position, "executor": executor})
@@ -222,7 +227,7 @@ def parse(text: str, cfg: Config) -> list[dict]:
 
 def apply(conn: sqlite3.Connection, briefing_id: int, commands: list[dict], cfg: Config) -> list[str]:
     """Applica salti, override, aggiunte e conferma alle voci. Restituisce le righe di riepilogo."""
-    b = conn.execute("SELECT status FROM briefings WHERE id = ?", (briefing_id,)).fetchone()
+    b = conn.execute("SELECT status, date FROM briefings WHERE id = ?", (briefing_id,)).fetchone()
     positions = {
         r["position"]: r
         for r in conn.execute("SELECT * FROM briefing_items WHERE briefing_id = ?", (briefing_id,)).fetchall()
@@ -232,7 +237,7 @@ def apply(conn: sqlite3.Connection, briefing_id: int, commands: list[dict], cfg:
             raise ReplyError(t("err.no_item", position=c["position"]))
 
     confirmed = b["status"] == "confirmed" or any(c["cmd"] == "confirm" for c in commands)
-    done = []
+    done, replacements = [], []
     if any(c["cmd"] == "skip_all" for c in commands):  # prima di tutto il resto
         conn.execute("UPDATE briefing_items SET status = 'skipped' WHERE briefing_id = ?", (briefing_id,))
         done.append(t("briefing.all_skipped"))
@@ -264,6 +269,9 @@ def apply(conn: sqlite3.Connection, briefing_id: int, commands: list[dict], cfg:
                     (briefing_id, task["id"], position, task["type"], executor, executor,
                      t("briefing.added_by", owner=cfg.owner_name), status),
                 )
+            # Aggiunto a mano: l'owner lo rivuole, salti e esclusioni passati non contano più.
+            conn.execute("UPDATE tasks SET snoozed_until = NULL, skip_count = 0, planner_excluded = 0 WHERE id = ?",
+                         (task["id"],))
             done.append(f"{position} {short_ref(task['external_id'])} → {executor}")
         elif c["cmd"] == "executor":
             conn.execute(
@@ -272,17 +280,15 @@ def apply(conn: sqlite3.Connection, briefing_id: int, commands: list[dict], cfg:
                 (c["executor"], "approved" if confirmed else "proposed", briefing_id, c["position"]),
             )
             done.append(f"{c['position']} → {c['executor']}")
-        elif c["cmd"] == "skip":
-            conn.execute(
-                "UPDATE briefing_items SET status = 'skipped' WHERE briefing_id = ? AND position = ?",
-                (briefing_id, c["position"]),
-            )
-            done.append(t("briefing.item_skipped", position=c["position"]))
+        elif c["cmd"] in ("skip", "never"):
+            done.extend(_skip(conn, cfg, briefing_id, b["date"], c["position"], c["cmd"] == "never", replacements))
     if any(c["cmd"] == "confirm" for c in commands):
+        # Una riserva arrivata in questo stesso messaggio l'owner non l'ha ancora vista: resta da confermare.
+        unseen = f" AND id NOT IN ({','.join('?' * len(replacements))})" if replacements else ""
         conn.execute(
-            """UPDATE briefing_items SET final_executor = COALESCE(final_executor, proposed_executor), status = 'approved'
-               WHERE briefing_id = ? AND status = 'proposed'""",
-            (briefing_id,),
+            f"""UPDATE briefing_items SET final_executor = COALESCE(final_executor, proposed_executor), status = 'approved'
+               WHERE briefing_id = ? AND status = 'proposed'{unseen}""",
+            (briefing_id, *replacements),
         )
         conn.execute(
             "UPDATE briefings SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, ?) WHERE id = ?",
@@ -290,6 +296,59 @@ def apply(conn: sqlite3.Connection, briefing_id: int, commands: list[dict], cfg:
         )
         done.append(t("briefing.confirmed"))
     return done
+
+
+def _skip(conn: sqlite3.Connection, cfg: Config, briefing_id: int, day: str, position: int, never: bool,
+          replacements: list[int]) -> list[str]:
+    """Salta una voce. Se era ancora da fare (proposta o approvata) il task viene ricordato (snooze, o escluso con
+    "mai") e la prima riserva libera del planner ne prende il posto, da confermare. Rileggere lo stato qui rende
+    innocuo un secondo "N salta" nello stesso messaggio o in un retry."""
+    row = conn.execute(
+        """SELECT i.status, i.task_id, t.external_id, t.source, t.skip_count FROM briefing_items i
+           JOIN tasks t ON t.id = i.task_id WHERE i.briefing_id = ? AND i.position = ?""",
+        (briefing_id, position),
+    ).fetchone()
+    conn.execute("UPDATE briefing_items SET status = 'skipped' WHERE briefing_id = ? AND position = ?",
+                 (briefing_id, position))
+    line = t("briefing.item_never" if never else "briefing.item_skipped", position=position)
+    if row["status"] not in ("proposed", "approved"):
+        if never:
+            conn.execute("UPDATE tasks SET planner_excluded = 1 WHERE id = ?", (row["task_id"],))
+        return [line]
+
+    count = row["skip_count"] + 1
+    until = (Date.fromisoformat(day) + timedelta(days=int(cfg.planner.get("skip_snooze_days", 7)))).isoformat()
+    conn.execute("UPDATE tasks SET skip_count = ?, snoozed_until = ?, planner_excluded = MAX(planner_excluded, ?) "
+                 "WHERE id = ?", (count, until, int(never), row["task_id"]))
+    reserve = conn.execute(
+        """SELECT r.*, t.external_id FROM briefing_reserves r JOIN tasks t ON t.id = r.task_id
+           WHERE r.briefing_id = ? AND r.used = 0 AND t.is_open = 1 AND t.planner_excluded = 0
+             AND (t.snoozed_until IS NULL OR t.snoozed_until <= ?)
+             AND r.task_id NOT IN (SELECT task_id FROM briefing_items WHERE briefing_id = ?)
+           ORDER BY r.rank LIMIT 1""",
+        (briefing_id, day, briefing_id),
+    ).fetchone()
+    if reserve is None:
+        line += t("briefing.no_reserve")
+    else:
+        new = conn.execute("SELECT MAX(position) + 1 FROM briefing_items WHERE briefing_id = ?",
+                           (briefing_id,)).fetchone()[0]
+        replacements.append(conn.execute(
+            """INSERT INTO briefing_items (briefing_id, task_id, position, proposed_type, proposed_executor,
+                   estimate_hours, rationale, decision_source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (briefing_id, reserve["task_id"], new, reserve["proposed_type"], reserve["proposed_executor"],
+             reserve["estimate_hours"], reserve["rationale"], reserve["decision_source"]),
+        ).lastrowid)
+        conn.execute("UPDATE briefing_reserves SET used = 1 WHERE id = ?", (reserve["id"],))
+        line += t("briefing.replaced_by", position=new, ref=short_ref(reserve["external_id"]),
+                  executor=reserve["proposed_executor"])
+    lines = [line]
+    if not never and count >= int(cfg.planner.get("skip_ask_after", 3)):
+        ref = short_ref(row["external_id"])
+        lines.append(t("briefing.skip_ask", ref=ref, count=count, position=position)
+                     + (t("briefing.skip_ask_close", ref=row["external_id"]) if row["source"] == "github" else ""))
+    return lines
 
 
 def record_reply(conn: sqlite3.Connection, briefing_id: int, message_id: int, text: str, parsed) -> bool:

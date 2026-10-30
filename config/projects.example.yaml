@@ -24,6 +24,8 @@ planner:
   max_tasks: 60
   timeout_seconds: 300
   exclude_statuses: [done, on hold, in review]
+  skip_snooze_days: 7         # "3 skip": the task is not proposed again for this many days
+  skip_ask_after: 3           # after this many skips Jarvis suggests "N never" (or closing the issue)
 
 commands:                     # GitHub commands written on Telegram (omit the section to disable them)
   executor: claude-sonnet

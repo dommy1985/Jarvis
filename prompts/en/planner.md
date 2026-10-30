@@ -16,5 +16,6 @@ How to choose:
 4. `estimate_hours` is {owner}'s attention time (review, trials, merge), not the agent's working time. For `me` it is the whole working time.
 5. `rationale`: one concrete sentence in English on why today and why that executor.
 6. `summary`: two lines at most in English on the plan of the day.
+7. `reserves`: up to 5 useful tasks that did not fit the hours, best first, with the same fields as the items and never already in `items`. If {owner} skips an item, the first reserve takes its place. If there are none, an empty list.
 
 Use only `task_id` values present in `<tasks>`. Do not invent tasks.

@@ -81,7 +81,7 @@ help.full: |-
   <b>Briefing</b>
   <code>briefing</code> resends today's updated briefing
   <code>ok</code> confirms · <code>2 haiku</code> changes the executor · <code>2 me</code> you do it
-  <code>3 skip</code> · <code>skip all</code> · <code>hours 4</code> regenerates with 4 hours
+  <code>3 skip</code> · <code>3 never</code> · <code>skip all</code> · <code>hours 4</code> regenerates with 4 hours
   <code>projects</code> lists the projects we work on
   <code>briefing on other-app</code> · <code>hours 3 on my-app and other-app</code> regenerates focused on those projects, just this once (<code>briefing on all</code> puts them all back)
   <code>PROJ-412 agy</code> or <code>&lt;link&gt; sonnet</code> adds an imported ticket
@@ -107,7 +107,7 @@ help.github: |-
   <i>assign 940 of my-app to {owner}</i>
   <i>clone PROJ-412 to GitHub</i>
 briefing.help_line: 'Commands: {commands}'
-briefing.help_commands: <code>ok</code> · <code>2 haiku</code> · <code>2 me</code> · <code>3 skip</code> · <code>hours 4</code> · <code>skip all</code> · <code>&lt;ticket link&gt; agy</code> · <code>briefing on other-app</code>
+briefing.help_commands: <code>ok</code> · <code>2 haiku</code> · <code>2 me</code> · <code>3 skip</code> · <code>3 never</code> · <code>hours 4</code> · <code>skip all</code> · <code>&lt;ticket link&gt; agy</code> · <code>briefing on other-app</code>
 briefing.hours: '{value:g}h'
 briefing.title: '🧠 <b>Briefing {weekday} {date}</b> · {hours} available #jarvis'
 briefing.confirmed_suffix: ' · ✅ confirmed'
@@ -117,6 +117,11 @@ briefing.total: Total {total} of {available}. 📌 project rule, ✏️ your cha
 briefing.too_long: … briefing too long, later items omitted.
 briefing.all_skipped: all items skipped
 briefing.item_skipped: '{position} skipped'
+briefing.item_never: '{position} will not be proposed again'
+briefing.replaced_by: ' · replaced by {position} {ref} → {executor}'
+briefing.no_reserve: ' · no reserve left (<code>hours N</code> to regenerate)'
+briefing.skip_ask: '{ref} skipped {count} times: <code>{position} never</code> to stop proposing it'
+briefing.skip_ask_close: ' or <code>close issue {ref}</code>'
 briefing.confirmed: confirmed
 briefing.added_by: Added by {owner} on Telegram.
 briefing.err.ambiguous_ref: '«{ref}» is ambiguous: write owner/repo#number'

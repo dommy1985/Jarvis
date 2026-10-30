@@ -185,6 +185,7 @@ def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: li
             (i["task_id"], i["id"], name, executors[name]["model"], now, base_branch, "plan" if planning else "agent",
              note[:2000] if note else None),
         )
+        conn.execute("UPDATE tasks SET skip_count = 0 WHERE id = ?", (i["task_id"],))  # ci si lavora: salti azzerati
         conn.execute(
             """UPDATE briefing_items SET status = 'queued', final_executor = ?,
                    decision_source = CASE WHEN ? THEN 'telegram' ELSE decision_source END WHERE id = ?""",

@@ -186,6 +186,18 @@ def test_replace_briefing_with_linked_task(server):
     assert (item["position"], item["final_executor"], item["status"]) == (2, "claude-sonnet", "approved")
 
 
+def test_skip_through_reply_snoozes_task(server):
+    app, url = server
+    post(f"{url}/plan", {})
+    r = post(f"{url}/reply", msg("1 salta", 710))
+    assert r["message"]["text"].startswith("✏️ 1 saltata · nessuna riserva")
+    first = planner.briefing(app.conn, app.today())["items"][0]
+    row = app.conn.execute("SELECT skip_count, snoozed_until FROM tasks WHERE external_id = ?",
+                           (first["external_id"],)).fetchone()
+    assert row["skip_count"] == 1 and row["snoozed_until"] > app.today()
+    assert post(f"{url}/reply", msg("2 mai", 711))["message"]["text"].startswith("✏️ 2 non verrà più proposta")
+
+
 def test_help_and_show_briefing(server):
     app, url = server
     first = post(f"{url}/reply", msg("briefing", 800))  # nessun briefing: lo genera adesso
