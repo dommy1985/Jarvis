@@ -16,5 +16,6 @@ Come scegliere:
 4. `estimate_hours` è il tempo di attenzione di {owner} (review, prove, merge), non il tempo di lavoro dell'agente. Per `me` è il tempo di lavoro intero.
 5. `rationale`: una frase in italiano, concreta, sul perché oggi e perché quell'esecutore.
 6. `summary`: due righe al massimo in italiano sul piano della giornata.
+7. `reserves`: fino a 5 task utili che non sono entrati nelle ore, dal migliore, con gli stessi campi delle voci e mai già presenti in `items`. Se {owner} salta una voce, la prima riserva ne prende il posto. Se non ce ne sono, lista vuota.
 
 Usa solo `task_id` presenti in `<tasks>`. Non inventare task.

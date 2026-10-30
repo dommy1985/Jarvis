@@ -21,7 +21,7 @@ Jarvis proposes, you decide. No irreversible action happens without your approva
 
 1. n8n ingests tasks; the server normalizes them into SQLite.
 2. The planner writes the briefing; it is posted in the Telegram topic.
-3. You confirm or change it. You can ask for a focused briefing once (`briefing on my-app`).
+3. You confirm or change it. You can ask for a focused briefing once (`briefing on my-app`). When you skip an item (`3 skip`) the planner's first reserve (a runner-up that did not fit the hours) takes its place, to be confirmed, and the skipped task is not proposed again for `planner.skip_snooze_days` days; after `planner.skip_ask_after` skips Jarvis suggests `3 never`, which drops it from planning until you add it by hand.
 4. `go N` queues approved items. You can pass instructions or clarifications with `go N note: <instructions>`. For delicate tasks `go N plan` first runs a read-only planning run; any open questions are highlighted on Telegram so you can reply with `revise {id} <reply>`, then you approve, revise or discard the plan. If an agent stops without changes because it needs clarification, Jarvis sends a dedicated notification proposing `go {pos} note: <clarification>`.
 5. The runner executes; `log` and `follow` show the agent's actions as it works.
 6. Cross-review by the other model family, one fix round, build and tests again.

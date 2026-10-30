@@ -60,6 +60,9 @@ skip:
 - 'no'
 - togli
 - via
+never:
+- mai
+- mai più
 human:
 - io
 - me

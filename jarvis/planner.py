@@ -14,6 +14,7 @@ from jarvis.config import Config
 from jarvis.i18n import t
 
 MAX_DESCRIPTION = 1500
+MAX_RESERVES = 5  # riserve tenute per sostituire le voci saltate
 
 # (system prompt, messaggio, schema JSON, modello, timeout) -> output strutturato
 ClaudeRunner = Callable[[str, str, dict, str, int], dict]
@@ -28,27 +29,27 @@ class BriefingLocked(PlannerError):
 
 
 def schema(cfg: Config) -> dict:
+    item = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["task_id", "type", "executor", "estimate_hours", "rationale"],
+        "properties": {
+            "task_id": {"type": "integer"},
+            "type": {"type": "string", "enum": sorted(cfg.raw["routing"])},
+            "executor": {"type": "string", "enum": sorted(cfg.raw["executors"])},
+            "estimate_hours": {"type": "number", "minimum": 0},
+            "rationale": {"type": "string"},
+        },
+    }
     return {
         "type": "object",
         "additionalProperties": False,
+        # `reserves` non è obbligatorio: un modello che non le dà non deve far fallire il briefing.
         "required": ["summary", "items"],
         "properties": {
             "summary": {"type": "string"},
-            "items": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["task_id", "type", "executor", "estimate_hours", "rationale"],
-                    "properties": {
-                        "task_id": {"type": "integer"},
-                        "type": {"type": "string", "enum": sorted(cfg.raw["routing"])},
-                        "executor": {"type": "string", "enum": sorted(cfg.raw["executors"])},
-                        "estimate_hours": {"type": "number", "minimum": 0},
-                        "rationale": {"type": "string"},
-                    },
-                },
-            },
+            "items": {"type": "array", "items": item},
+            "reserves": {"type": "array", "items": item},
         },
     }
 
@@ -75,7 +76,10 @@ def candidates(conn: sqlite3.Connection, cfg: Config, today: str, focus: list[st
     only = cfg.focus_projects(focus)  # briefing concentrato: solo i task di questi progetti
     paused = {name for name, p in cfg.projects.items() if p.get("paused")}
     rows = conn.execute(
-        "SELECT * FROM tasks WHERE is_open = 1 AND eligible = 1 ORDER BY updated_at DESC"
+        """SELECT * FROM tasks WHERE is_open = 1 AND eligible = 1 AND planner_excluded = 0
+               AND (snoozed_until IS NULL OR snoozed_until <= ?)
+           ORDER BY updated_at DESC""",
+        (today,),
     ).fetchall()
     tasks = []
     for r in rows:
@@ -162,6 +166,7 @@ def plan(
             conn.execute("""UPDATE runs SET briefing_item_id = NULL WHERE briefing_item_id IN
                             (SELECT id FROM briefing_items WHERE briefing_id = ?)""", (existing["id"],))
             conn.execute("DELETE FROM briefing_items WHERE briefing_id = ?", (existing["id"],))
+            conn.execute("DELETE FROM briefing_reserves WHERE briefing_id = ?", (existing["id"],))
             conn.execute(
                 """UPDATE briefings SET available_hours = ?, status = ?, planner_executor = ?, raw_output = ?,
                        error = ?, telegram_message_id = NULL, created_at = ?, sent_at = NULL, confirmed_at = NULL,
@@ -198,6 +203,26 @@ def plan(
                        estimate_hours, rationale, decision_source)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (briefing_id, task["task_id"], position, item["type"], executor_name,
+                 item["estimate_hours"], item["rationale"], source),
+            )
+        rank = 0
+        for item in (output or {}).get("reserves") or []:
+            task = by_id.get(item["task_id"])
+            if task is None or rank == MAX_RESERVES:
+                continue
+            if conn.execute(
+                """SELECT 1 FROM briefing_items WHERE briefing_id = ? AND task_id = ?
+                   UNION ALL SELECT 1 FROM briefing_reserves WHERE briefing_id = ? AND task_id = ?""",
+                (briefing_id, task["task_id"], briefing_id, task["task_id"]),
+            ).fetchone():
+                continue  # già fra le voci o duplicato
+            executor_name, source = cfg.executor_for(task["project"], item["type"], item["executor"])
+            rank += 1
+            conn.execute(
+                """INSERT INTO briefing_reserves (briefing_id, task_id, rank, proposed_type, proposed_executor,
+                       estimate_hours, rationale, decision_source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (briefing_id, task["task_id"], rank, item["type"], executor_name,
                  item["estimate_hours"], item["rationale"], source),
             )
         conn.execute("COMMIT")

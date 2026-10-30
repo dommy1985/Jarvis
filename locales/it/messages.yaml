@@ -81,7 +81,7 @@ help.full: |-
   <b>Briefing</b>
   <code>briefing</code> rimanda il briefing di oggi aggiornato
   <code>ok</code> conferma · <code>2 haiku</code> cambia esecutore · <code>2 io</code> la fai tu
-  <code>3 salta</code> · <code>salta tutto</code> · <code>ore 4</code> rigenera con 4 ore
+  <code>3 salta</code> · <code>3 mai</code> · <code>salta tutto</code> · <code>ore 4</code> rigenera con 4 ore
   <code>progetti</code> elenca i progetti su cui operiamo
   <code>briefing su other-app</code> · <code>ore 3 su my-app e other-app</code> rigenera concentrato su quei progetti, una volta tanto (<code>briefing su tutti</code> li rimette tutti)
   <code>PROJ-412 agy</code> o <code>&lt;link&gt; sonnet</code> aggiunge un ticket importato
@@ -107,7 +107,7 @@ help.github: |-
   <i>assegna la 940 di my-app a {owner}</i>
   <i>clona PROJ-412 su GitHub</i>
 briefing.help_line: 'Comandi: {commands}'
-briefing.help_commands: <code>ok</code> · <code>2 haiku</code> · <code>2 io</code> · <code>3 salta</code> · <code>ore 4</code> · <code>salta tutto</code> · <code>&lt;link ticket&gt; agy</code> · <code>briefing su other-app</code>
+briefing.help_commands: <code>ok</code> · <code>2 haiku</code> · <code>2 io</code> · <code>3 salta</code> · <code>3 mai</code> · <code>ore 4</code> · <code>salta tutto</code> · <code>&lt;link ticket&gt; agy</code> · <code>briefing su other-app</code>
 briefing.hours: '{value:g}h'
 briefing.title: '🧠 <b>Briefing {weekday} {date}</b> · {hours} disponibili #jarvis'
 briefing.confirmed_suffix: ' · ✅ confermato'
@@ -117,6 +117,11 @@ briefing.total: Totale {total} su {available}. 📌 regola di progetto, ✏️ t
 briefing.too_long: … briefing troppo lungo, voci successive omesse.
 briefing.all_skipped: tutte le voci saltate
 briefing.item_skipped: '{position} saltata'
+briefing.item_never: '{position} non verrà più proposta'
+briefing.replaced_by: ' · al suo posto {position} {ref} → {executor}'
+briefing.no_reserve: ' · nessuna riserva (<code>ore N</code> per rigenerare)'
+briefing.skip_ask: '{ref} saltato {count} volte: <code>{position} mai</code> per non riproporlo'
+briefing.skip_ask_close: ' o <code>chiudi la issue {ref}</code>'
 briefing.confirmed: confermato
 briefing.added_by: Aggiunto da {owner} su Telegram.
 briefing.err.ambiguous_ref: '«{ref}» è ambiguo: scrivi owner/repo#numero'
