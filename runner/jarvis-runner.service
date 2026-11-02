@@ -11,6 +11,8 @@ WorkingDirectory=@REPO@
 ExecStart=@UV@ run --project @REPO@ python -m runner.runner
 Restart=always
 RestartSec=60
+# all'arresto i run in corso si fermano e mandano l'esito (fino a ~150 s): non ucciderlo prima
+TimeoutStopSec=180
 # i log vanno nel journal: journalctl --user -u @UNIT@ -f
 
 [Install]

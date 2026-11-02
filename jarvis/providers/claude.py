@@ -56,7 +56,7 @@ def claude_reset(text: str, now: datetime | None = None) -> str | None:
 class ClaudeProvider(Provider):
     name = "claude"
     binary = "claude"
-    capabilities = frozenset({"execute", "plan_structured", "review"})  # niente "quota": Claude non espone le quote
+    capabilities = frozenset({"execute", "plan_structured", "review", "concurrent"})  # niente "quota": Claude non espone le quote
     uses_task_suffix = True
 
     def build_exec_cmd(self, executor: dict, prompt: str, *, commands: Sequence[str | None],

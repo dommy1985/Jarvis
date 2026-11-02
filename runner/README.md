@@ -1,6 +1,6 @@
 # Runner Jarvis (Mac)
 
-Esegue i run messi in coda da Telegram (`vai N`): un task alla volta, in un git worktree, con l'esecutore
+Esegue i run messi in coda da Telegram (`vai N`): fino a `runner.max_parallel` task insieme (default 1, uno per thread), ognuno in un git worktree, con l'esecutore
 assegnato (Claude Code o Antigravity), poi build e test, push del branch `agent/<id>` e PR draft con `gh`.
 Dettagli in [`docs/GUIDA.md`](../docs/GUIDA.md#esecuzione-fase-2) e [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
 
@@ -68,4 +68,6 @@ Progetti con submodule (`submodules` in `projects.yaml`, es. my-app → my-lib):
 
 `agent_notes` del progetto finiscono nel prompt come regole in più (es. riga nel `changelog.md` di ogni modulo toccato).
 
-Un solo runner per server: il server considera orfano un run `running` quando arriva un claim, quindi non lanciare `runner.py --once` a mano mentre il LaunchAgent è attivo. Il runner chiede lavoro solo dopo aver consegnato tutti gli esiti in sospeso.
+Un solo runner per server: a ogni claim il runner manda l'elenco dei run che sta ancora eseguendo e il server considera orfano ogni altro run `running`, quindi non lanciare `runner.py --once` a mano mentre il LaunchAgent è attivo. Il runner chiede lavoro solo dopo aver consegnato tutti gli esiti in sospeso, e un run esce dall'elenco solo dopo che il suo esito è consegnato o salvato in sospeso.
+
+**Run in parallelo** (`runner.max_parallel`, default 1). Il server decide cosa può partire: mai due run dello stesso progetto (app e submodule contano come lo stesso), mai un progetto con `parallel_safe: false` insieme ad altri (simulatore, porte fisse, cache condivise), mai due sessioni della stessa CLI se il provider non ha la capability `concurrent` (oggi copilot), e non una CLI che ha appena preso un rate limit in un altro run. Nel runner `fetch`, `worktree`, `branch` e `submodule` sullo stesso repo passano da un lock (chiave: la cartella `.git` comune) e l'auto-gc di git è spento. Con SIGTERM i run in corso si fermano al controllo successivo (come `ferma N`) e mandano l'esito; il runner li aspetta fino a 2 minuti (più l'intervallo di controllo, 30 s), quindi il LaunchAgent e l'unit systemd hanno un timeout di arresto di 180 s. Un run interrotto così risulta fallito (non annullato) e il worktree resta sul disco: si riprende con `vai N`. Ordine di aggiornamento: prima il server, poi il runner (un runner nuovo con un server vecchio resta a un run alla volta).

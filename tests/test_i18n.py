@@ -357,3 +357,29 @@ def test_english_provider_schema_prompts():
         from jarvis.providers.schema import validate
         assert validate({"a": 1}, {"type": "object", "required": ["b"], "additionalProperties": False,
                                    "properties": {}}) == ["$: missing b", "$: unexpected field a"]
+
+
+def test_using_is_per_thread_and_keeps_the_process_default():
+    import threading
+    i18n.set_locale("it")
+    seen = {}
+    inside = threading.Event()
+    done = threading.Event()
+
+    def worker():
+        with i18n.using("en"):
+            seen["worker"] = i18n.get_locale()
+            inside.set()
+            done.wait(5)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    inside.wait(5)
+    seen["main"] = i18n.get_locale()  # il run in inglese nel thread non cambia la lingua degli altri
+    done.set()
+    thread.join()
+    fresh = {}
+    t2 = threading.Thread(target=lambda: fresh.setdefault("locale", i18n.get_locale()))
+    t2.start()
+    t2.join()
+    assert seen == {"worker": "en", "main": "it"} and fresh["locale"] == "it"

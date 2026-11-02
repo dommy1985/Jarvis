@@ -9,6 +9,7 @@ va usata com'è e può contenere graffe. Se manca una chiave nel locale scelto s
 """
 
 import re
+from contextvars import ContextVar
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -21,6 +22,7 @@ LOCALES = ROOT / "locales"
 PROMPTS = ROOT / "prompts"
 
 _current = DEFAULT
+_override: ContextVar[str | None] = ContextVar("jarvis_locale", default=None)  # using(): per contesto
 
 
 class LocaleError(ValueError):
@@ -44,18 +46,18 @@ def set_locale(code: str) -> None:
 
 
 def get_locale() -> str:
-    return _current
+    return _override.get() or _current
 
 
 @contextmanager
 def using(code: str):
-    """Locale temporaneo (test, runner): ripristina il precedente all'uscita."""
-    previous = _current
-    set_locale(code)
+    """Locale temporaneo (test, runner): vale solo nel contesto corrente (thread), così due run in parallelo nel
+    runner possono parlare lingue diverse; il default di processo (`set_locale`) resta quello."""
+    token = _override.set(check(code))
     try:
         yield
     finally:
-        set_locale(previous)
+        _override.reset(token)
 
 
 @lru_cache(maxsize=None)
@@ -69,12 +71,12 @@ def messages(code: str) -> dict:
 
 
 def vocabulary(code: str | None = None) -> dict:
-    return _load(code or _current, "vocab")
+    return _load(code or get_locale(), "vocab")
 
 
 def t(key: str, /, **params) -> str:
     """Testo del locale corrente (o dell'inglese se manca); con `params` sostituisce i segnaposto."""
-    text = messages(_current).get(key)
+    text = messages(get_locale()).get(key)
     if text is None:
         text = messages(DEFAULT)[key]
     return text.format(**params) if params else text
@@ -97,4 +99,4 @@ def every(key: str) -> tuple[str, ...]:
 
 def prompt(name: str, code: str | None = None) -> str:
     """Testo grezzo di `prompts/<locale>/<name>.md`."""
-    return (PROMPTS / (code or _current) / f"{name}.md").read_text(encoding="utf-8")
+    return (PROMPTS / (code or get_locale()) / f"{name}.md").read_text(encoding="utf-8")
