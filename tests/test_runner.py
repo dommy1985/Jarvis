@@ -1101,7 +1101,6 @@ def test_pool_does_not_claim_with_outcomes_still_pending():
 
 def test_pool_releases_the_slot_only_after_the_final_update():
     """Il run esce dagli attivi solo a esito consegnato (o in PENDING): se no il server lo vedrebbe orfano."""
-    import threading
     seen = []
     api = _PoolApi([{"run_id": 7}])
     pool = runner.Pool(api, run=lambda job, a: seen.append(dict(pool.active)))
