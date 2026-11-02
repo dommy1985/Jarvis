@@ -92,6 +92,7 @@ help.full: |-
   <code>vai 4 base:redesign</code> parte da quel branch e la PR punta lì (default: <code>base_branch</code> del progetto)
   <code>vai 4 nota: escludi X</code> passa istruzioni o chiarimenti all'agente
   <code>vai my-app#933 sonnet</code> aggiunge un ticket al briefing e lo mette in coda
+  <code>vai 1 3 insieme</code> in parallelo anche se stesso progetto o dipendenti (⛓): di solito la dipendente parte sulla PR dell'altra
   <code>coda</code> stato dei run · <code>svuota coda</code> toglie quelli non ancora partiti
   <code>vai 4 piano</code> (anche <code>vai 4 piano agy</code>) prima il piano, poi decidi: <code>approva 12</code> · <code>modifica 12 &lt;testo&gt;</code> · <code>scarta 12</code>
   <code>log</code> (o <code>log 7</code>) ultime azioni dell'agente · <code>segui</code> le aggiorna da sole, <code>basta</code> per smettere
@@ -113,6 +114,7 @@ briefing.title: '🧠 <b>Briefing {weekday} {date}</b> · {hours} disponibili #j
 briefing.confirmed_suffix: ' · ✅ confermato'
 briefing.human: io
 briefing.skipped_detail: '    saltata'
+briefing.after: " · ⛓ dopo {positions}"
 briefing.total: Totale {total} su {available}. 📌 regola di progetto, ✏️ tua modifica.
 briefing.too_long: … briefing troppo lungo, voci successive omesse.
 briefing.all_skipped: tutte le voci saltate
@@ -253,6 +255,10 @@ runs.wait.same_project: stesso progetto già in esecuzione
 runs.wait.same_parent: si sta già lavorando sulla stessa PR
 runs.wait.cli: "{cli} non regge due sessioni insieme"
 runs.wait.quota: "{cli} ha appena preso un rate limit"
+runs.repair_rebase: "Prima la ribaso sulla base normale (la PR di #{run_id} è mergiata)."
+outcomes.stacked_rebase: "⛓ La PR di #{below} è mergiata: la PR del run #{run_id} era impilata lì. Scrivi <code>ripara {run_id}</code> per ribasarla sulla base normale."
+runs.wait.dependency: "aspetta #{run} (dipendenza)"
+runs.dependency_unsatisfied: "⛓ Run #{run_id}: dipendenza non soddisfatta ({refs}), parte dalla base normale."
 runs.err.which_run: "ci sono {n} run attivi, quale? {runs}"
 notif.who_realign: riallineamento del submodule
 notif.who_repair: '{executor} (riparazione del run #{parent})'
@@ -434,6 +440,8 @@ runner.err.nothing_in_sub: niente da committare in {path} oltre ai file locali
 runner.err.nothing: niente da committare oltre ai file locali
 runner.err.no_plan: l'agente non ha scritto nessun piano
 runner.err.runner: 'errore del runner: {error}'
+runner.err.rebase: 'rebase sulla base {base} non riuscito (la PR sotto era {pr}), va fatto a mano: {tail}'
+runner.pr.stacked: '⛓ Impilata sulla PR del run #{run_id} ({url}): va mergiata prima quella. Dopo il merge, `ripara` la ribasa sulla base normale.'
 runner.err.shutdown: il runner è stato arrestato o riavviato durante il run
 runner.note.local_missing: 'file locale non trovato, non copiato: `{label}{name}`'
 runner.note.transient: 'primo tentativo dell''agente fallito per un errore temporaneo: {error}'

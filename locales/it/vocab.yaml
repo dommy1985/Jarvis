@@ -142,6 +142,8 @@ base_word:
 note_word:
 - nota
 - note
+together_word:
+- insieme
 plan_word:
 - piano
 the_word:

@@ -401,7 +401,8 @@ def render(b: dict, notes: list[str] = ()) -> str:
         ref = f'<a href="{html.escape(i["url"], quote=True)}">{html.escape(short_ref(i["external_id"]))}</a>'
         head = f"<b>{i['position']}.</b> {ref} {html.escape(i['title'], quote=False)}"
         detail = (f"    {t('briefing.human') if executor == 'me' else executor}{tag} · {i['proposed_type'] or '-'}"
-                  f" · {_hours(i['estimate_hours'])}")
+                  f" · {_hours(i['estimate_hours'])}"
+                  + (t("briefing.after", positions=i["after"]) if i.get("after") else ""))
         if i["status"] == "skipped":
             head, detail = f"<s>{head}</s>", t("briefing.skipped_detail")
         else:

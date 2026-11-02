@@ -732,6 +732,25 @@ def repair_comment(job: dict, tests: str, test_output: str, notes: list[str], re
     return "\n".join(lines)
 
 
+def rebase_stacked(repo: Path, wt: Path, base: str, run_id: int, rebase: dict | None, step: str) -> str | None:
+    """PR impilata su una PR ora mergiata: porta su `base` solo i commit propri (git rebase --onto), togliendo
+    quelli della PR sotto, letti da GitHub (pull/N/head) anche se il suo branch è già stato cancellato.
+    Restituisce il commit di partenza (per il push con --force-with-lease) o None se non c'era niente da fare."""
+    if not rebase:
+        return None
+    ref = f"refs/jarvis/stack-{run_id}"
+    git(repo, "fetch", "origin", f"+pull/{rebase['pr_number']}/head:{ref}", step=step, timeout=600)
+    try:
+        start = git(wt, "rev-parse", "HEAD", step=step)
+        code, out = git_sh(["rebase", "--onto", base, ref], wt, 600)  # identità git dell'owner, come commit_all
+        if code != 0:
+            git_sh(["rebase", "--abort"], wt, 60)
+            raise StepError(step, tr("runner.err.rebase", pr=rebase["pr_url"], base=base, tail=tail(out, 10)))
+        return start
+    finally:
+        git_sh(["update-ref", "-d", ref], repo, 60)
+
+
 def remove_worktree(repo: Path, wt: Path) -> None:
     """git rifiuta di rimuovere worktree con submodule: in quel caso si cancella la cartella e si fa prune."""
     if git_sh(["worktree", "remove", "--force", str(wt)], repo, 120)[0] != 0:
@@ -812,6 +831,9 @@ def pr_body(job: dict, summary: str, tests: str, test_output: str, notes: list[s
              + (tr("runner.pr.fallback", executor=job["fallback_from"]) if job.get("fallback_from") else ""), ""]
     if links:
         lines += [*links, ""]
+    stacked = job.get("stacked_on")
+    if stacked and repo in (None, job.get("repo")):  # solo la PR dell'app: le PR impilate non hanno submodule
+        lines += [tr("runner.pr.stacked", run_id=stacked["run_id"], url=stacked["pr_url"] or stacked["branch"]), ""]
     command = " && ".join(filter(None, [job["project"]["build"], job["project"]["test"]]))
     if tests == "skipped":
         lines.append(tr("runner.pr.tests_skipped"))
@@ -988,6 +1010,7 @@ def execute(job: dict, api: Api, run_agent=sh_stream, gh=sh, usage=None) -> None
         else:
             git(repo, "worktree", "add", "-b", branch, str(wt), base, step=step)
         api.update(run_id, step=step, branch=branch, worktree_path=str(wt))
+        rebased_from = rebase_stacked(repo, wt, base, run_id, (repair or {}).get("rebase"), step)
         copied = copy_local(repo, wt, project.get("copy_files"), notes)
         cwd = wt / project["workdir"] if project.get("workdir") else wt
 
@@ -1111,8 +1134,15 @@ def execute(job: dict, api: Api, run_agent=sh_stream, gh=sh, usage=None) -> None
         commit_all(wt, copied, message, step)
         if repair:
             pushed = int(git(wt, "rev-list", "--count", f"origin/{branch}..HEAD", step=step)) > 0
-            if pushed:
+            if pushed and rebased_from:  # storia riscritta: solo se il branch remoto è ancora quello di partenza
+                git(wt, "push", f"--force-with-lease=refs/heads/{branch}:{rebased_from}", "origin",
+                    f"HEAD:refs/heads/{branch}", step=step, timeout=600)
+            elif pushed:
                 git(wt, "push", "origin", f"HEAD:refs/heads/{branch}", step=step, timeout=600)
+            if rebased_from:  # GitHub la ripunta da solo solo se il branch sotto è stato cancellato
+                code, out = gh(["gh", "pr", "edit", repair["pr_url"], "--base", base.split("/", 1)[1]], wt, 120)
+                if code != 0:
+                    log.warning("run %s: base della PR non cambiata: %s", run_id, tail(out, 3))
         else:
             if int(git(wt, "rev-list", "--count", f"{base}..HEAD", step=step)) == 0:
                 raise StepError(step, tr("runner.err.nothing"))

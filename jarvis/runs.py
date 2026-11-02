@@ -9,6 +9,7 @@ import html
 import json
 import logging
 import re
+import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -24,7 +25,7 @@ BASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 LOG_KEEP_DAYS = 7
 LOG_PER_RUN = 300
 RUNNER_OFFLINE_MINUTES = 3  # il runner chiede lavoro ogni minuto
-PATTERN_NAMES = ("GO", "GO_REF", "BASE", "NOTE", "PLAN_WORD", "APPROVE", "DISCARD", "REVISE", "LOG", "REPAIR", "STOP")
+PATTERN_NAMES = ("GO", "GO_REF", "BASE", "NOTE", "PLAN_WORD", "TOGETHER_WORD", "APPROVE", "DISCARD", "REVISE", "LOG", "REPAIR", "STOP")
 
 
 @functools.lru_cache(maxsize=None)
@@ -41,6 +42,7 @@ def _patterns(locale: str) -> dict:
         "BASE": re.compile(rf"(?:^|\s)(?:{alternation('base_word')})\s*[:=]\s*(\S+)", re.IGNORECASE),  # "vai 4 agy base:redesign"
         "NOTE": re.compile(rf"(?:^|\s)(?:{alternation('note_word')})\s*[:=]\s*(.+)$", re.IGNORECASE | re.DOTALL),  # "vai 4 nota: escludi X"
         "PLAN_WORD": re.compile(rf"(?:^|\s)(?:{plan})(?=\s|$)", re.IGNORECASE),  # "vai 4 piano agy"
+        "TOGETHER_WORD": re.compile(rf"(?:^|\s)(?:{alternation('together_word')})(?=\s|$)", re.IGNORECASE),
         "APPROVE": re.compile(rf"(?:{alternation('approve_verbs')}){ref}"),
         "DISCARD": re.compile(rf"(?:{alternation('discard_verbs')}){ref}"),
         "REVISE": re.compile(rf"(?:{alternation('revise_verbs')})\s+(?:(?:(?:{the})\s+)?(?:(?:{plan})\s+)?(?:(?:{run})\s+)?#?(\d+)\s+)?(.+)",
@@ -102,6 +104,13 @@ def split_plan(text: str) -> tuple[str, bool]:
     return (stripped, True) if stripped != text.strip() else (text, False)
 
 
+def split_together(text: str) -> tuple[str, bool]:
+    """"vai 1 2 insieme" -> ("vai 1 2", True): l'owner li vuole in parallelo anche se il progetto o il planner
+    direbbero di aspettare."""
+    stripped = re.sub(r"\s{2,}", " ", _rx("TOGETHER_WORD").sub(" ", text)).strip()
+    return (stripped, True) if stripped != text.strip() else (text, False)
+
+
 def valid_base(name: str) -> bool:
     """Nome di branch ammesso come base: niente opzioni git, `..` o suffissi riservati."""
     return bool(BASE_NAME.fullmatch(name)) and ".." not in name and not name.endswith(("/", ".lock"))
@@ -114,6 +123,7 @@ def parse_go(text: str) -> dict | None:
     text, note = split_note(text)
     text, base = split_base(text)
     text, plan = split_plan(text)
+    text, together = split_together(text)
     m = _rx("GO").fullmatch(" ".join(text.strip().lower().split()).rstrip(".!"))
     if m is None:
         return None
@@ -123,6 +133,8 @@ def parse_go(text: str) -> dict | None:
         go["base"] = base
     if plan:
         go["plan"] = True
+    if together:
+        go["together"] = True
     if note:
         go["note"] = note
     return go
@@ -130,7 +142,7 @@ def parse_go(text: str) -> dict | None:
 
 def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: list[int],
           executor: str | None = None, base_branch: str | None = None, plan: bool = False,
-          note: str | None = None) -> tuple[list[str], list[tuple[str, int, int]]]:
+          note: str | None = None, together: bool = False) -> tuple[list[str], list[tuple[str, int, int]]]:
     """Mette in coda le voci approvate (tutte se positions è vuota), con `executor` e `base_branch` se indicati.
     Con `plan` (o `plan_first` nel progetto) parte prima un run di piano: l'agente non tocca niente, il piano va
     all'owner e il lavoro parte solo con "approva N". `note` aggiunge eventuali istruzioni dell'owner.
@@ -175,15 +187,16 @@ def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: li
             raise RunError(t("runs.err.project_unavailable", where=where))
 
     now, done, to_assign = _iso(_now()), [], []
+    group = f"g{briefing_id}-{secrets.token_hex(3)}" if together and len(chosen) > 1 else None
     for i in chosen:
         name = i["final_executor"] or i["proposed_executor"]
         planning = plan or bool(cfg.projects.get(i["project"], {}).get("plan_first"))
         conn.execute(
             """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind,
-                                 owner_note)
-               VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)""",
+                                 owner_note, parallel_group)
+               VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)""",
             (i["task_id"], i["id"], name, executors[name]["model"], now, base_branch, "plan" if planning else "agent",
-             note[:2000] if note else None),
+             note[:2000] if note else None, group),
         )
         conn.execute("UPDATE tasks SET skip_count = 0 WHERE id = ?", (i["task_id"],))  # ci si lavora: salti azzerati
         conn.execute(
@@ -258,10 +271,10 @@ def approve_plan(conn: sqlite3.Connection, run_id: int | None) -> str:
     conn.execute("UPDATE runs SET plan_state = 'approved' WHERE id = ?", (plan["id"],))
     cur = conn.execute(
         """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind,
-                             plan_of, owner_note)
-           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'agent', ?, ?)""",
+                             plan_of, owner_note, parallel_group, depends_on_run)
+           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'agent', ?, ?, ?, ?)""",
         (plan["task_id"], plan["briefing_item_id"], plan["executor"], plan["model"], _iso(_now()),
-         plan["base_branch"], plan["id"], plan["owner_note"]),
+         plan["base_branch"], plan["id"], plan["owner_note"], plan["parallel_group"], plan["depends_on_run"]),
     )
     return t("runs.plan_approved", plan_id=plan["id"], executor=html.escape(plan["executor"]), run_id=cur.lastrowid)
 
@@ -275,10 +288,11 @@ def revise_plan(conn: sqlite3.Connection, run_id: int | None, note: str) -> str:
     conn.execute("UPDATE runs SET plan_state = 'revised' WHERE id = ?", (plan["id"],))
     cur = conn.execute(
         """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind,
-                             plan_of, plan_note, owner_note)
-           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'plan', ?, ?, ?)""",
+                             plan_of, plan_note, owner_note, parallel_group, depends_on_run)
+           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'plan', ?, ?, ?, ?, ?)""",
         (plan["task_id"], plan["briefing_item_id"], plan["executor"], plan["model"], _iso(_now()),
-         plan["base_branch"], plan["id"], note[:2000], plan["owner_note"]),
+         plan["base_branch"], plan["id"], note[:2000], plan["owner_note"], plan["parallel_group"],
+         plan["depends_on_run"]),
     )
     return t("runs.plan_revised", run_id=cur.lastrowid, plan_id=plan["id"])
 
@@ -367,6 +381,12 @@ def repair(conn: sqlite3.Connection, cfg: Config, run_id: int, executor: str | N
     name = executor or run["executor"]
     if not providers.can(cfg.raw["executors"].get(name, {}).get("cli"), "execute"):
         raise RunError(t("runs.err.executor_not_executable", name=name))
+    # PR impilata su una PR ora mergiata: la riparazione la ribasa sulla base normale (rebase --onto) e la ripunta lì.
+    stacked = conn.execute("SELECT * FROM runs WHERE id = ?", (run["depends_on_run"],)).fetchone() \
+        if run["depends_on_run"] else None
+    rebase = bool(stacked and run["base_branch"] == stacked["branch"] and stacked["status"] == "done"
+                  and stacked["pr_outcome"] in APPROVED)
+    base = (cfg.projects.get(run["project"] or "", {}).get("base_branch") if rebase else run["base_branch"])
     # Commenti e CI rossa visti da outcomes.refresh: passano all'agente insieme ai test falliti.
     seen = json.loads(run["feedback"] or "{}")
     feedback = None
@@ -375,15 +395,17 @@ def repair(conn: sqlite3.Connection, cfg: Config, run_id: int, executor: str | N
                     "until": seen.get("until") or run["checked_at"] or _iso(_now())}
     cur = conn.execute(
         """INSERT INTO runs (task_id, executor, model, status, queued_at, kind, project, parent_run_id, branch,
-                             pr_url, sub_pr_urls, feedback, base_branch)
-           VALUES (?, ?, ?, 'queued', ?, 'repair', ?, ?, ?, ?, ?, ?, ?)""",
+                             pr_url, sub_pr_urls, feedback, base_branch, depends_on_run)
+           VALUES (?, ?, ?, 'queued', ?, 'repair', ?, ?, ?, ?, ?, ?, ?, ?)""",
         (run["task_id"], name, cfg.raw["executors"][name]["model"], _iso(_now()), run["project"], run["id"],
          run["branch"], run["pr_url"], run["sub_pr_urls"], json.dumps(feedback, ensure_ascii=False) if feedback else None,
-         run["base_branch"]),
+         base, stacked["id"] if rebase else None),
     )
     work = t("runs.repair_work")
     if feedback:
         work = t("runs.repair_work_feedback", feedback=feedback_line(feedback))
+    if rebase:
+        work = t("runs.repair_rebase", run_id=stacked["id"]) + " " + work
     return t("runs.repair_queued", run_id=run["id"], name=name, new_id=cur.lastrowid, work=work)
 
 
@@ -455,7 +477,7 @@ def _running(conn: sqlite3.Connection, cfg: Config) -> list[dict]:
     """I run in corso, con quello che serve a can_start."""
     since = _iso(_now() - timedelta(minutes=RATE_LIMIT_WAIT_MINUTES))
     rows = conn.execute(
-        """SELECT r.id, r.kind, r.executor, r.parent_run_id, COALESCE(r.project, t.project) AS project,
+        """SELECT r.id, r.kind, r.executor, r.parent_run_id, r.parallel_group, COALESCE(r.project, t.project) AS project,
                   EXISTS (SELECT 1 FROM quota_events q WHERE q.run_id = r.id AND q.kind = 'rate_limited'
                           AND q.observed_at >= ?) AS rate_limited
            FROM runs r JOIN tasks t ON t.id = r.task_id WHERE r.status = 'running'""", (since,)).fetchall()
@@ -468,6 +490,8 @@ def can_start(cfg: Config, run: dict, running: list[dict]) -> str | None:
 
     `run` ha: kind, project (quello in cui gira, dopo submodule_parent), cli (None se non lancia agenti),
     parent_run_id. Ogni voce di `running` ha anche id e rate_limited."""
+    if run.get("wait_on"):  # dipendenza del planner non ancora pronta (anche senza niente in corso)
+        return "dependency"
     if not running:
         return None
     if len(running) >= int(cfg.runner.get("max_parallel") or 1):
@@ -477,7 +501,9 @@ def can_start(cfg: Config, run: dict, running: list[dict]) -> str | None:
             or any(not projects.get(r["project"], {}).get("parallel_safe", True) for r in running):
         return "parallel_safe"
     family = _family(cfg, run["project"])
-    if any(r["project"] in family or run["project"] in _family(cfg, r["project"]) for r in running):
+    group = run.get("parallel_group")
+    if any((r["project"] in family or run["project"] in _family(cfg, r["project"]))
+           and not (group and r.get("parallel_group") == group) for r in running):  # "insieme": l'owner li vuole così
         return "same_project"
     if run.get("parent_run_id") and any(run["parent_run_id"] in (r["id"], r["parent_run_id"]) for r in running):
         return "same_parent"
@@ -498,29 +524,78 @@ def _effective_executor(conn: sqlite3.Connection, cfg: Config, row: sqlite3.Row)
     return _next_executor(conn, cfg, row["executor"], {row["executor"]}) or row["executor"]
 
 
+APPROVED = ("approved_as_is", "approved_with_changes")
+
+
+def dependencies(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    """Stato delle dipendenze proposte dal planner per un run in coda (voce del briefing con depends_on).
+
+    - wait_on: run da aspettare (dipendenza in coda o in corso, piano in attesa, PR aperta con submodule, più PR
+      aperte da cui impilarsi);
+    - stack: il run su cui impilarsi (PR aperta senza submodule): si parte dal suo branch;
+    - unsatisfied: task da cui dipende ma senza lavoro utile (mai lanciato, fallito, PR scartata): si parte dalla base
+      normale e l'owner viene avvisato.
+    I run lanciati "insieme" all'owner ignorano le dipendenze fra loro. Un run che ha già una base (scelta
+    dall'owner, o impilato prima di un ritentativo) non le guarda più."""
+    out = {"wait_on": [], "stack": None, "unsatisfied": []}
+    if row["kind"] not in ("agent", "plan") or not row["depends_on"] or row["base_branch"] or row["depends_on_run"]:
+        return out
+    group, stacks = row["parallel_group"], []
+    for task_id in json.loads(row["depends_on"]):
+        runs_of = conn.execute(
+            """SELECT r.*, t.external_id FROM runs r JOIN tasks t ON t.id = r.task_id
+               WHERE r.task_id = ? AND r.kind IN ('agent', 'plan', 'repair') ORDER BY r.id DESC""",
+            (task_id,)).fetchall()
+        if group and any(r["parallel_group"] == group for r in runs_of):
+            continue
+        active = next((r for r in runs_of if r["status"] in ("queued", "running")), None)
+        latest = runs_of[0] if runs_of else None
+        agent = next((r for r in runs_of if r["kind"] == "agent"), None)
+        if active:
+            out["wait_on"].append(active["id"])
+        elif latest and latest["kind"] == "plan" and latest["plan_state"] in ("proposed", "approved"):
+            out["wait_on"].append(latest["id"])  # piano in attesa dell'owner: il lavoro vero arriverà
+        elif agent and agent["status"] == "pr_open" and agent["branch"]:
+            if json.loads(agent["sub_pr_urls"] or "[]"):
+                out["wait_on"].append(agent["id"])  # il puntatore del submodule punterebbe a un commit non mergiato
+            else:
+                stacks.append(agent)
+        elif agent and agent["status"] == "done" and agent["pr_outcome"] in APPROVED:
+            continue  # mergiata: è già nella base
+        else:
+            ref = latest["external_id"] if latest else conn.execute(
+                "SELECT external_id FROM tasks WHERE id = ?", (task_id,)).fetchone()["external_id"]
+            out["unsatisfied"].append(ref)
+    if len(stacks) > 1:  # una sola base possibile: si aspetta che le altre vengano mergiate
+        out["wait_on"] += [s["id"] for s in stacks[1:]]
+    if stacks and not out["wait_on"]:
+        out["stack"] = stacks[0]
+    return out
+
+
 def _candidate(cfg: Config, conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     parent = cfg.submodule_parent(row["task_project"])
     executor = _effective_executor(conn, cfg, row)
     return {"kind": row["kind"], "project": parent[0] if parent else row["project"],
-            "cli": _cli(cfg, executor) if row["kind"] != "realign" else None, "parent_run_id": row["parent_run_id"]}
+            "cli": _cli(cfg, executor) if row["kind"] != "realign" else None, "parent_run_id": row["parent_run_id"],
+            "parallel_group": row["parallel_group"], "wait_on": dependencies(conn, row)["wait_on"]}
 
 
 def waiting(conn: sqlite3.Connection, cfg: Config) -> dict[int, str]:
     """run_id -> motivo (già tradotto) dei run in coda che adesso non possono partire, per "coda"."""
     running = _running(conn, cfg)
     out = {}
-    if not running:
-        return out
     for row in conn.execute(CLAIM_SELECT + " ORDER BY r.id").fetchall():
         candidate = _candidate(cfg, conn, row)
         reason = can_start(cfg, candidate, running)
         if reason:
-            out[row["id"]] = t(f"runs.wait.{reason}", cli=candidate["cli"] or "")
+            out[row["id"]] = t(f"runs.wait.{reason}", cli=candidate["cli"] or "",
+                               run=", #".join(map(str, candidate["wait_on"])))
     return out
 
 
 CLAIM_SELECT = """SELECT r.id, r.executor, r.model, r.kind, r.parent_run_id, r.feedback, r.fallback_from, r.base_branch,
-                  r.plan_of, r.plan_note, r.owner_note,
+                  r.plan_of, r.plan_note, r.owner_note, r.parallel_group, r.depends_on_run, i.depends_on,
                   t.source, t.external_id,
                   COALESCE(r.project, t.project) AS project, t.project AS task_project,
                   COALESCE(i.proposed_type, t.type) AS type, t.title, t.description, t.url, t.labels
@@ -553,8 +628,16 @@ def claim(conn: sqlite3.Connection, cfg: Config) -> dict | None:
     project = cfg.projects[run_project]
     # La base di progetto vale solo per i run nuovi: una riparazione (o un riallineamento) di un run creato prima
     # della migrazione con base NULL resta sul branch di default, dove sta la sua PR.
-    base_branch = row["base_branch"] or (project.get("base_branch") if row["kind"] == "agent" else None)
-    if base_branch and base_branch != row["base_branch"]:  # base di progetto: la salvo, "ripara N" riusa la stessa
+    deps = dependencies(conn, row)
+    stacked = deps["stack"]
+    if stacked and row["kind"] == "plan":
+        pass  # il piano legge il codice impilato, ma non lo salva: all'approvazione il run vero rivaluta le dipendenze
+    elif stacked:  # impilato sulla PR aperta da cui dipende: parte dal suo branch, la PR punta lì
+        conn.execute("UPDATE runs SET base_branch = ?, depends_on_run = ? WHERE id = ?",
+                     (stacked["branch"], stacked["id"], row["id"]))
+    base_branch = (stacked["branch"] if stacked else row["base_branch"]) or (
+        project.get("base_branch") if row["kind"] == "agent" else None)
+    if base_branch and base_branch != row["base_branch"] and not stacked:  # base di progetto: la salvo, "ripara N" riusa la stessa
         conn.execute("UPDATE runs SET base_branch = ? WHERE id = ?", (base_branch, row["id"]))
     job = {
         "run_id": row["id"],
@@ -580,6 +663,11 @@ def claim(conn: sqlite3.Connection, cfg: Config) -> dict | None:
     }
     if row["owner_note"]:
         job["user_note"] = row["owner_note"]
+    if stacked:
+        job["stacked_on"] = {"run_id": stacked["id"], "pr_url": stacked["pr_url"], "branch": stacked["branch"]}
+    if deps["unsatisfied"]:  # il server lo manda all'owner, non va al runner
+        job["dependency_notice"] = t("runs.dependency_unsatisfied", run_id=row["id"],
+                                     refs=", ".join(html.escape(short_ref(r)) for r in deps["unsatisfied"]))
     if parent:
         job["focus"] = parent[1]
     if row["kind"] == "realign":  # niente agente: sposta il submodule della PR app sul commit mergiato
@@ -613,6 +701,12 @@ def claim(conn: sqlite3.Connection, cfg: Config) -> dict | None:
         if row["feedback"]:
             feedback = json.loads(row["feedback"])
             job["repair"]["feedback"] = {"comments": feedback["comments"], "ci": feedback["ci"]}
+        if row["depends_on_run"]:  # ribasa la PR impilata: toglie i commit della PR già mergiata
+            below = conn.execute("SELECT pr_url, branch FROM runs WHERE id = ?", (row["depends_on_run"],)).fetchone()
+            number = re.search(r"/pull/(\d+)", below["pr_url"] or "")
+            if number:
+                job["repair"]["rebase"] = {"pr_number": int(number.group(1)), "pr_url": below["pr_url"],
+                                           "branch": below["branch"]}
     if row["fallback_from"]:  # sostituito in partenza: quota dell'esecutore scelto esaurita
         job["fallback_from"] = row["fallback_from"]
     elif row["kind"] == "agent" and row["parent_run_id"]:  # ripartito con la controparte per quota esaurita
@@ -732,6 +826,9 @@ def update(conn: sqlite3.Connection, run_id: int, payload: dict, cfg: Config | N
         # il feedback passato all'agente è sistemato: contano solo i commenti scritti dopo
         since = json.loads(run["feedback"])["until"] if run["feedback"] else run["queued_at"]
         conn.execute("UPDATE runs SET feedback_since = ? WHERE id = ?", (since, run["parent_run_id"]))
+    if run["kind"] == "repair" and status == "done" and run["depends_on_run"]:
+        # ribasata: da ora la PR del run originale sta sulla base normale, e le prossime riparazioni partono da lì
+        conn.execute("UPDATE runs SET base_branch = ? WHERE id = ?", (run["base_branch"], run["parent_run_id"]))
     if run["kind"] == "repair" and status == "done" and payload.get("sub_pr_urls"):
         # una PR nuova su un submodule toccato solo nella riparazione: la segue il run originale (riallineamento)
         conn.execute("UPDATE runs SET sub_pr_urls = ? WHERE id = ?", (fields["sub_pr_urls"], run["parent_run_id"]))
@@ -758,10 +855,11 @@ def _fallback(conn: sqlite3.Connection, cfg: Config, run: dict) -> None:
         return
     conn.execute(
         """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, kind, parent_run_id,
-                             base_branch, owner_note, plan_of)
-           VALUES (?, ?, ?, ?, 'queued', ?, 'agent', ?, ?, ?, ?)""",
+                             base_branch, owner_note, plan_of, parallel_group, depends_on_run)
+           VALUES (?, ?, ?, ?, 'queued', ?, 'agent', ?, ?, ?, ?, ?, ?)""",
         (run["task_id"], run["briefing_item_id"], other, cfg.raw["executors"][other]["model"], _iso(_now()), run["id"],
-         run["base_branch"], run.get("owner_note"), run.get("plan_of")),
+         run["base_branch"], run.get("owner_note"), run.get("plan_of"), run.get("parallel_group"),
+         run.get("depends_on_run")),
     )
     conn.execute("UPDATE briefing_items SET status = 'queued', final_executor = ? WHERE id = ?",
                  (other, run["briefing_item_id"]))

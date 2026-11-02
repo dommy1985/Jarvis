@@ -17,5 +17,6 @@ Come scegliere:
 5. `rationale`: una frase in italiano, concreta, sul perché oggi e perché quell'esecutore.
 6. `summary`: due righe al massimo in italiano sul piano della giornata.
 7. `reserves`: fino a 5 task utili che non sono entrati nelle ore, dal migliore, con gli stessi campi delle voci e mai già presenti in `items`. Se {owner} salta una voce, la prima riserva ne prende il posto. Se non ce ne sono, lista vuota.
+8. `depends_on` (facoltativo): i `task_id` delle altre voci di oggi di cui questo task ha bisogno del codice (per esempio l'app che usa una funzione che un'altra voce aggiunge alla libreria). Jarvis lo farà partire sul branch di quella voce. Può dipendere solo da voci elencate prima, quindi metti prima quella da cui dipende. Solo se la dipendenza è reale: due task dello stesso progetto senza legame non dipendono uno dall'altro.
 
 Usa solo `task_id` presenti in `<tasks>`. Non inventare task.

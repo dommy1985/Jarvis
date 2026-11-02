@@ -39,6 +39,8 @@ def schema(cfg: Config) -> dict:
             "executor": {"type": "string", "enum": sorted(cfg.raw["executors"])},
             "estimate_hours": {"type": "number", "minimum": 0},
             "rationale": {"type": "string"},
+            # opzionale: task_id delle voci di oggi di cui questo task ha bisogno del codice (run impilati)
+            "depends_on": {"type": "array", "items": {"type": "integer"}},
         },
     }
     return {
@@ -188,6 +190,7 @@ def plan(
             ).lastrowid
 
         position = 0
+        earlier: set[int] = set()  # dipendenze solo verso voci precedenti: niente cicli (A→B e B→A) che aspettano per sempre
         for item in (output or {}).get("items", []):
             task = by_id.get(item["task_id"])
             if task is None:
@@ -198,12 +201,15 @@ def plan(
                 continue  # duplicato
             executor_name, source = cfg.executor_for(task["project"], item["type"], item["executor"])
             position += 1
+            # Solo dipendenze verso le voci di oggi già elencate: id inventati, il task stesso e i cicli si ignorano.
+            depends = sorted({d for d in item.get("depends_on") or [] if isinstance(d, int) and d in earlier})
+            earlier.add(task["task_id"])
             conn.execute(
                 """INSERT INTO briefing_items (briefing_id, task_id, position, proposed_type, proposed_executor,
-                       estimate_hours, rationale, decision_source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       estimate_hours, rationale, decision_source, depends_on)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (briefing_id, task["task_id"], position, item["type"], executor_name,
-                 item["estimate_hours"], item["rationale"], source),
+                 item["estimate_hours"], item["rationale"], source, json.dumps(depends) if depends else None),
             )
         rank = 0
         for item in (output or {}).get("reserves") or []:
@@ -240,7 +246,9 @@ def briefing(conn: sqlite3.Connection, date: str) -> dict | None:
         return None
     items = conn.execute(
         """SELECT i.position, i.proposed_type, i.proposed_executor, i.final_executor, i.estimate_hours,
-                  i.rationale, i.decision_source, i.status, t.external_id, t.project, t.title, t.url
+                  i.rationale, i.decision_source, i.status, t.external_id, t.project, t.title, t.url,
+                  (SELECT group_concat(d.position, ', ') FROM briefing_items d, json_each(i.depends_on) j
+                   WHERE d.briefing_id = i.briefing_id AND d.task_id = j.value) AS after
            FROM briefing_items i JOIN tasks t ON t.id = i.task_id
            WHERE i.briefing_id = ? ORDER BY i.position""",
         (row["id"],),

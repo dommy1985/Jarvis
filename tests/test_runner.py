@@ -1170,3 +1170,45 @@ def test_agent_env_disables_git_auto_gc(tmp_path):
     keys = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
     assert keys["gc.auto"] == "0" and keys["credential.helper"] == ""
     assert (tmp_path / "hooks" / "pre-push").stat().st_mode & 0o111
+
+
+def test_rebase_stacked_drops_the_merged_commits_of_the_pr_below(repo, tmp_path):
+    """PR impilata su una PR mergiata con squash (branch sotto già cancellato): restano solo i commit propri."""
+    repo, _ = repo
+    run("git", "checkout", "-q", "-b", "agent/5", cwd=repo)
+    (repo / "s.txt").write_text("s\n")
+    run("git", "add", "s.txt", cwd=repo)
+    run("git", "commit", "-qm", "S", cwd=repo)
+    run("git", "push", "-q", "origin", "agent/5", "agent/5:refs/pull/12/head", cwd=repo)
+    run("git", "checkout", "-q", "-b", "agent/6", cwd=repo)
+    (repo / "r.txt").write_text("r\n")
+    run("git", "add", "r.txt", cwd=repo)
+    run("git", "commit", "-qm", "R", cwd=repo)
+    run("git", "push", "-q", "origin", "agent/6", cwd=repo)
+    run("git", "checkout", "-q", "main", cwd=repo)
+    (repo / "s.txt").write_text("s\n")  # squash merge: stesso contenuto, commit diverso
+    run("git", "add", "s.txt", cwd=repo)
+    run("git", "commit", "-qm", "S (squash)", cwd=repo)
+    run("git", "push", "-q", "origin", "main", ":agent/5", cwd=repo)
+    run("git", "fetch", "-q", "--prune", cwd=repo)
+    wt = tmp_path / "wt6"
+    run("git", "worktree", "add", "-q", "--detach", str(wt), "origin/agent/6", cwd=repo)
+
+    start = runner.rebase_stacked(repo, wt, "origin/main", 6,
+                                  {"pr_number": 12, "pr_url": "https://github.com/x/y/pull/12", "branch": "agent/5"},
+                                  "worktree")
+    log = subprocess.run(["git", "log", "--format=%s", "origin/main..HEAD"], cwd=wt, capture_output=True,
+                         text=True).stdout.split()
+    assert start and log == ["R"] and (wt / "s.txt").exists() and (wt / "r.txt").exists()
+    refs = subprocess.run(["git", "for-each-ref", "refs/jarvis"], cwd=repo, capture_output=True, text=True).stdout
+    assert refs == ""  # il ref temporaneo non resta
+    assert runner.rebase_stacked(repo, wt, "origin/main", 6, None, "worktree") is None
+
+
+def test_stacked_pr_body_points_to_the_pr_below(tmp_path):
+    j = job(Path("."), tmp_path) | {"repo": "alex-dev/novainfo",
+                                    "stacked_on": {"run_id": 5, "pr_url": "https://github.com/x/y/pull/12",
+                                                   "branch": "agent/5"}}
+    body = runner.pr_body(j, "fatto", "passed", "", [], repo="alex-dev/novainfo")
+    assert "#5" in body and "https://github.com/x/y/pull/12" in body
+    assert "pull/12" not in runner.pr_body(j, "fatto", "passed", "", [], repo="alex-dev/my-lib")

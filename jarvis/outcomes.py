@@ -150,6 +150,11 @@ def refresh(conn: sqlite3.Connection, gh: GitHub) -> list[str]:
         if outcome:
             conn.execute("UPDATE runs SET status = 'done', pr_outcome = ? WHERE id = ?", (outcome, run["id"]))
             log.info("run %s: PR %s -> %s", run["id"], run["pr_url"], outcome)
+            if outcome in ("approved_as_is", "approved_with_changes"):
+                for above in conn.execute(  # PR impilate su questa: vanno ribasate, lo decide l'owner
+                        "SELECT id FROM runs WHERE depends_on_run = ? AND kind = 'agent' AND status = 'pr_open' "
+                        "AND base_branch = ?", (run["id"], run["branch"])).fetchall():
+                    messages.append(t("outcomes.stacked_rebase", run_id=above["id"], below=run["id"]))
             if outcome in ("approved_as_is", "approved_with_changes") and run["external_id"] and "#" in run["external_id"]:
                 repo, _, num_str = run["external_id"].partition("#")
                 if repo and num_str.isdigit():
