@@ -17,5 +17,6 @@ How to choose:
 5. `rationale`: one concrete sentence in English on why today and why that executor.
 6. `summary`: two lines at most in English on the plan of the day.
 7. `reserves`: up to 5 useful tasks that did not fit the hours, best first, with the same fields as the items and never already in `items`. If {owner} skips an item, the first reserve takes its place. If there are none, an empty list.
+8. `depends_on` (optional): the `task_id` of other items of today whose code this task needs (for example the app using a function that another item adds to the library). Jarvis will start it on that item's branch. It can only depend on items listed before it, so put the one it depends on first. Only for a real dependency: two unrelated tasks of the same project do not depend on each other.
 
 Use only `task_id` values present in `<tasks>`. Do not invent tasks.

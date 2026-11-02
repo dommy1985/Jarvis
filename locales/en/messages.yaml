@@ -91,6 +91,7 @@ help.full: |-
   <code>go 4 agy</code> changes the executor and queues
   <code>go 4 base:redesign</code> starts from that branch and the PR targets it (default: the project's <code>base_branch</code>)
   <code>go 4 note: exclude X</code> passes instructions or clarifications to the agent
+  <code>go 1 3 together</code> in parallel even if same project or dependent (⛓): normally the dependent one starts on the other's PR
   <code>go my-app#933 sonnet</code> adds a ticket to the briefing and queues it
   <code>queue</code> run status · <code>clear queue</code> removes the ones not started yet
   <code>go 4 plan</code> (also <code>go 4 plan agy</code>) plan first, then you decide: <code>approve 12</code> · <code>revise 12 &lt;text&gt;</code> · <code>discard 12</code>
@@ -113,6 +114,7 @@ briefing.title: '🧠 <b>Briefing {weekday} {date}</b> · {hours} available #jar
 briefing.confirmed_suffix: ' · ✅ confirmed'
 briefing.human: me
 briefing.skipped_detail: '    skipped'
+briefing.after: " · ⛓ after {positions}"
 briefing.total: Total {total} of {available}. 📌 project rule, ✏️ your change.
 briefing.too_long: … briefing too long, later items omitted.
 briefing.all_skipped: all items skipped
@@ -253,6 +255,10 @@ runs.wait.same_project: same project already running
 runs.wait.same_parent: same PR already being worked on
 runs.wait.cli: "{cli} cannot run two sessions at once"
 runs.wait.quota: "{cli} just hit a rate limit"
+runs.repair_rebase: "First it rebases it onto the normal base (the PR of #{run_id} is merged)."
+outcomes.stacked_rebase: "⛓ The PR of #{below} is merged: the PR of run #{run_id} was stacked on it. Send <code>repair {run_id}</code> to rebase it onto the normal base."
+runs.wait.dependency: "waiting for #{run} (dependency)"
+runs.dependency_unsatisfied: "⛓ Run #{run_id}: dependency not satisfied ({refs}), starting from the normal base."
 runs.err.which_run: "{n} runs are active, which one? {runs}"
 notif.who_realign: submodule realignment
 notif.who_repair: '{executor} (repair of run #{parent})'
@@ -434,6 +440,8 @@ runner.err.nothing_in_sub: nothing to commit in {path} besides local files
 runner.err.nothing: nothing to commit besides local files
 runner.err.no_plan: the agent did not write any plan
 runner.err.runner: 'runner error: {error}'
+runner.err.rebase: 'rebase onto {base} failed (the PR below was {pr}), it needs a manual fix: {tail}'
+runner.pr.stacked: '⛓ Stacked on the PR of run #{run_id} ({url}): merge that one first. After the merge, `repair` rebases this one onto the normal base.'
 runner.err.shutdown: the runner was stopped or restarted during the run
 runner.note.local_missing: 'local file not found, not copied: `{label}{name}`'
 runner.note.transient: 'the agent''s first attempt failed with a temporary error: {error}'

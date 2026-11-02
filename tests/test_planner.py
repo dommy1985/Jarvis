@@ -138,3 +138,27 @@ def test_paused_project_is_not_proposed(conn, cfg):
     assert "alex-dev/catch-ball#2" not in {t["ref"] for t in planner.candidates(conn, cfg, "2026-10-11")}
     active = config.Config({**cfg.raw, "projects": {**cfg.projects, "catch-ball": {**cfg.projects["catch-ball"], "paused": False}}})
     assert "alex-dev/catch-ball#2" in {t["ref"] for t in planner.candidates(conn, active, "2026-10-11")}
+
+
+def test_depends_on_keeps_only_other_items_of_today(conn, cfg):
+    nova, lib, proj = (task_id(conn, r) for r in ("alex-dev/novainfo#31", "acme/my-lib#9", "PROJ-1"))
+    fake = FakeClaude({"summary": "s", "items": [
+        item(lib),
+        item(nova) | {"depends_on": [lib, nova, 9999, proj, "x"]},  # sé stesso, inventato, non fra le voci: via
+        item(proj) | {"depends_on": [nova]},
+    ]})
+    planner.plan(conn, cfg, "2026-10-11", runner=fake)
+    rows = conn.execute("SELECT position, depends_on FROM briefing_items ORDER BY position").fetchall()
+    assert [(r["position"], r["depends_on"]) for r in rows] == [(1, None), (2, json.dumps([lib])),
+                                                                 (3, json.dumps([nova]))]
+    items = planner.briefing(conn, "2026-10-11")["items"]
+    assert [i["after"] for i in items] == [None, "1", "2"]
+
+
+def test_depends_on_cycles_are_dropped(conn, cfg):
+    nova, lib = task_id(conn, "alex-dev/novainfo#31"), task_id(conn, "acme/my-lib#9")
+    fake = FakeClaude({"summary": "s", "items": [item(lib) | {"depends_on": [nova]}, item(nova) | {"depends_on": [lib]}]})
+    planner.plan(conn, cfg, "2026-10-11", runner=fake)
+    rows = conn.execute("SELECT depends_on FROM briefing_items ORDER BY position").fetchall()
+    assert [r["depends_on"] for r in rows] == [None, json.dumps([lib])]  # solo verso voci precedenti
+    assert "depends_on" in planner.schema(cfg)["properties"]["items"]["items"]["properties"]

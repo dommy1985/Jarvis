@@ -668,3 +668,163 @@ def test_old_runner_without_active_keeps_one_run_at_a_time(server):
     assert claimed["run"]["run_id"] == 1 and claimed["max_parallel"] == 1
     post(f"{url}/runner/claim", {}, token="rt")  # un runner vecchio chiede lavoro solo quando è libero
     assert app.conn.execute("SELECT status FROM runs WHERE id = 1").fetchone()["status"] == "failed"
+
+
+# --- dipendenze fra voci e "insieme" ---
+
+def _depends(app, position, on_position):
+    """La voce `position` del briefing dipende dal task della voce `on_position` (come se l'avesse detto il planner)."""
+    b = planner.briefing(app.conn, app.today())
+    task = app.conn.execute("SELECT task_id FROM briefing_items WHERE briefing_id = ? AND position = ?",
+                            (b["id"], on_position)).fetchone()["task_id"]
+    app.conn.execute("UPDATE briefing_items SET depends_on = ? WHERE briefing_id = ? AND position = ?",
+                     (json.dumps([task]), b["id"], position))
+
+
+def _open_pr(url, run_id, **extra):
+    post(f"{url}/runner/update", {"run_id": run_id, "step": "worktree", "branch": f"agent/{run_id}"}, token="rt")
+    post(f"{url}/runner/update", {"run_id": run_id, "status": "pr_open", "step": "pr",
+                                 "pr_url": f"https://github.com/alex-dev/novainfo/pull/{40 + run_id}", **extra},
+         token="rt")
+
+
+def test_parse_go_together():
+    assert runs.parse_go("vai 1 3 insieme") == {"positions": [1, 3], "executor": None, "together": True}
+    assert runs.parse_go("vai insieme 1 3 agy")["executor"] == "agy"
+    with i18n.using("en"):
+        assert runs.parse_go("go 1 3 together")["together"] is True
+
+
+def test_dependent_run_waits_then_starts_stacked_on_the_open_pr(server):
+    app, notifier, url = server
+    app.cfg.raw["runner"]["max_parallel"] = 2
+    post(f"{url}/plan", {})
+    _depends(app, 3, 1)
+    assert "⛓ dopo 1" in planner_text(app)
+    say(url, "ok", 1)
+    say(url, "vai 3", 2)  # la dipendente prima: deve comunque aspettare la voce 1
+    say(url, "vai 1", 3)
+    first = post(f"{url}/runner/claim", {"active": []}, token="rt")["run"]
+    assert first["run_id"] == 2  # run 1 (voce 3) aspetta la voce 1 anche se è in coda da prima
+    assert "aspetta #2 (dipendenza)" in say(url, "coda", 4)
+    assert post(f"{url}/runner/claim", {"active": [2]}, token="rt")["run"] is None
+    _open_pr(url, 2)
+    job = post(f"{url}/runner/claim", {"active": []}, token="rt")["run"]
+    assert job["run_id"] == 1 and job["base_branch"] == "agent/2"
+    assert job["stacked_on"] == {"run_id": 2, "pr_url": "https://github.com/alex-dev/novainfo/pull/42",
+                                 "branch": "agent/2"}
+    row = app.conn.execute("SELECT base_branch, depends_on_run FROM runs WHERE id = 1").fetchone()
+    assert (row["base_branch"], row["depends_on_run"]) == ("agent/2", 2)
+
+
+def test_dependency_with_submodule_prs_waits_for_the_merge(server):
+    app, notifier, url = server
+    post(f"{url}/plan", {})
+    _depends(app, 3, 1)
+    say(url, "ok", 1)
+    say(url, "vai 1 3", 2)
+    post(f"{url}/runner/claim", {"active": []}, token="rt")
+    _open_pr(url, 1, sub_pr_urls=["https://github.com/alex-dev/my-lib/pull/3"])
+    assert post(f"{url}/runner/claim", {"active": []}, token="rt")["run"] is None
+    app.conn.execute("UPDATE runs SET status = 'done', pr_outcome = 'approved_as_is' WHERE id = 1")
+    job = post(f"{url}/runner/claim", {"active": []}, token="rt")["run"]
+    assert job["run_id"] == 2 and job["base_branch"] is None and "stacked_on" not in job
+
+
+def test_failed_dependency_does_not_block_and_warns(server):
+    app, notifier, url = server
+    post(f"{url}/plan", {})
+    _depends(app, 3, 1)
+    say(url, "ok", 1)
+    say(url, "vai 1 3", 2)
+    post(f"{url}/runner/claim", {"active": []}, token="rt")
+    post(f"{url}/runner/update", {"run_id": 1, "status": "failed", "step": "agent", "error": "x"}, token="rt")
+    job = post(f"{url}/runner/claim", {"active": []}, token="rt")["run"]
+    assert job["run_id"] == 2 and job["base_branch"] is None and "dependency_notice" not in job
+    assert "dipendenza non soddisfatta (novainfo#1)" in notifier.sent[-1]
+
+
+def test_together_lifts_dependency_and_same_project_but_not_parallel_safe(server):
+    app, notifier, url = server
+    app.cfg.raw["runner"]["max_parallel"] = 2
+    post(f"{url}/plan", {})
+    _depends(app, 3, 1)
+    say(url, "ok", 1)
+    say(url, "vai 1 3 insieme", 2)
+    groups = {r["parallel_group"] for r in app.conn.execute("SELECT parallel_group FROM runs")}
+    assert len(groups) == 1 and None not in groups
+    assert post(f"{url}/runner/claim", {"active": []}, token="rt")["run"]["run_id"] == 1
+    job = post(f"{url}/runner/claim", {"active": [1]}, token="rt")["run"]
+    assert job["run_id"] == 2 and job["base_branch"] is None  # insieme: dalla base normale, niente impilamento
+    # con parallel_safe: false nemmeno "insieme" basta
+    post(f"{url}/runner/update", {"run_id": 2, "status": "cancelled", "step": "agent"}, token="rt")
+    app.cfg.projects["novainfo"]["parallel_safe"] = False
+    say(url, "vai 3", 3)
+    app.conn.execute("UPDATE runs SET parallel_group = (SELECT parallel_group FROM runs WHERE id = 1) WHERE id = 3")
+    assert post(f"{url}/runner/claim", {"active": [1]}, token="rt")["run"] is None
+
+
+def test_merged_dependency_proposes_and_repair_rebases_the_stacked_pr(server):
+    from jarvis import outcomes
+    app, notifier, url = server
+    app.cfg.raw["runner"]["max_parallel"] = 2
+    post(f"{url}/plan", {})
+    _depends(app, 3, 1)
+    say(url, "ok", 1)
+    say(url, "vai 1 3", 2)
+    post(f"{url}/runner/claim", {"active": []}, token="rt")
+    _open_pr(url, 1)
+    post(f"{url}/runner/claim", {"active": []}, token="rt")
+    _open_pr(url, 2)
+
+    class GH:  # PR del run 1 mergiata, quella del run 2 ancora aperta
+        def pull(self, repo, number):
+            return {"state": "closed" if number == 41 else "open", "merged": number == 41,
+                    "merge_commit_sha": "abc"}
+
+        def pull_commits(self, repo, number):
+            return []
+
+        def issue(self, repo, number):
+            return {"state": "closed"}
+
+        def __getattr__(self, name):
+            return lambda *a, **k: []
+
+    messages = outcomes.refresh(app.conn, GH())
+    assert any("ripara 2" in m for m in messages)
+    reply = say(url, "ripara 2", 3)
+    assert "ribaso sulla base normale" in reply
+    job = post(f"{url}/runner/claim", {"active": []}, token="rt")["run"]
+    assert job["kind"] == "repair" and job["base_branch"] is None
+    assert job["repair"]["rebase"] == {"pr_number": 41, "pr_url": "https://github.com/alex-dev/novainfo/pull/41",
+                                       "branch": "agent/1"}
+    post(f"{url}/runner/update", {"run_id": job["run_id"], "status": "done", "step": "pr",
+                                 "pr_url": "https://github.com/alex-dev/novainfo/pull/42"}, token="rt")
+    assert app.conn.execute("SELECT base_branch FROM runs WHERE id = 2").fetchone()["base_branch"] is None
+
+
+def planner_text(app):
+    from jarvis import briefing
+    return briefing.render(planner.briefing(app.conn, app.today()))
+
+
+def test_stacked_plan_run_does_not_pin_the_base_of_the_approved_run(server):
+    app, notifier, url = server
+    post(f"{url}/plan", {})
+    _depends(app, 3, 1)
+    say(url, "ok", 1)
+    say(url, "vai 1", 2)
+    post(f"{url}/runner/claim", {"active": []}, token="rt")
+    _open_pr(url, 1)
+    say(url, "vai 3 piano", 3)
+    plan = post(f"{url}/runner/claim", {"active": []}, token="rt")["run"]
+    assert plan["kind"] == "plan" and plan["base_branch"] == "agent/1"  # il piano legge il codice impilato
+    row = app.conn.execute("SELECT base_branch, depends_on_run FROM runs WHERE id = ?", (plan["run_id"],)).fetchone()
+    assert (row["base_branch"], row["depends_on_run"]) == (None, None)
+    post(f"{url}/runner/update", {"run_id": plan["run_id"], "status": "done", "step": "agent", "plan": "piano"},
+         token="rt")
+    app.conn.execute("UPDATE runs SET status = 'done', pr_outcome = 'approved_as_is' WHERE id = 1")  # mergiata nel frattempo
+    say(url, f"approva {plan['run_id']}", 4)
+    job = post(f"{url}/runner/claim", {"active": []}, token="rt")["run"]
+    assert job["kind"] == "agent" and job["base_branch"] is None and "stacked_on" not in job

@@ -124,6 +124,8 @@ class Handler(BaseHTTPRequestHandler):
         if job:
             log.info("run %s al runner: %s %s", job["run_id"], job["executor"]["name"], job["task"]["external_id"])
             self.app.notify_run(job["run_id"])
+            if (notice := job.pop("dependency_notice", None)) and self.app.notifier:
+                self.app.notifier.send(notice)
         self._send(200, {"run": job, "max_parallel": int(cfg.runner.get("max_parallel") or 1)})
 
     def _run_update(self, payload: dict):
@@ -256,6 +258,7 @@ class Handler(BaseHTTPRequestHandler):
         text_no_note, note = runs.split_note(text)
         text_no_base, base = runs.split_base(text_no_note)
         text_no_base, plan = runs.split_plan(text_no_base)
+        text_no_base, _ = runs.split_together(text_no_base)
         word_no_base = " ".join(text_no_base.strip().lower().split()).rstrip(".!")
         if go is None and (m := runs.GO_REF.fullmatch(word_no_base)):
             try:
@@ -385,7 +388,8 @@ class Handler(BaseHTTPRequestHandler):
                         )
                         positions = [position]
                     done, to_assign = runs.queue(self.app.conn, self.app.cfg, current["id"], positions, executor, go.get("base"),
-                                                plan=go.get("plan", False), note=go.get("note"))
+                                                plan=go.get("plan", False), note=go.get("note"),
+                                                together=go.get("together", False))
                     self.app.conn.execute("COMMIT")
                 except (runs.RunError, briefing.ReplyError) as e:
                     self.app.conn.execute("ROLLBACK")
