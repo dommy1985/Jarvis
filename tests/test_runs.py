@@ -828,3 +828,62 @@ def test_stacked_plan_run_does_not_pin_the_base_of_the_approved_run(server):
     say(url, f"approva {plan['run_id']}", 4)
     job = post(f"{url}/runner/claim", {"active": []}, token="rt")["run"]
     assert job["kind"] == "agent" and job["base_branch"] is None and "stacked_on" not in job
+
+
+# --- mailbox fra run attivi ---
+
+def _two_running(app, url):
+    app.cfg.raw["runner"]["max_parallel"] = 2
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1 3 insieme", 2)
+    post(f"{url}/runner/claim", {"active": []}, token="rt")
+    post(f"{url}/runner/claim", {"active": [1]}, token="rt")
+
+
+def test_mailbox_between_running_runs(server):
+    app, notifier, url = server
+    _two_running(app, url)
+    peers = post(f"{url}/runner/peers", {"run_id": 1}, token="rt")["peers"]
+    assert [p["id"] for p in peers] == [2]
+    assert post(f"{url}/runner/peers", {"run_id": 1}, token="secret")["http"] == 401  # solo il token del runner
+
+    ask = post(f"{url}/runner/message", {"from_run": 1, "to_run": 2, "body": "come si chiama? token=abc123",
+                                        "ask": True}, token="rt")["id"]
+    assert post(f"{url}/runner/inbox", {"run_id": 1}, token="rt")["messages"] == []
+    got = post(f"{url}/runner/inbox", {"run_id": 2}, token="rt")["messages"]
+    assert [(m["id"], m["from_run"], m["kind"]) for m in got] == [(ask, 1, "ask")]
+    assert "abc123" not in got[0]["body"] and "***" in got[0]["body"]  # segreti tolti anche sul server
+    assert post(f"{url}/runner/inbox", {"run_id": 2}, token="rt")["messages"] == []  # già letto
+
+    # attesa incrociata: il run 2 non può a sua volta aspettare il run 1 finché non gli risponde
+    crossed = post(f"{url}/runner/message", {"from_run": 2, "to_run": 1, "body": "e tu?", "ask": True}, token="rt")
+    assert crossed["http"] == 409 and "attesa incrociata" in crossed["error"]
+    reply = post(f"{url}/runner/message", {"from_run": 2, "reply_to": ask, "body": "parseToken"}, token="rt")["id"]
+    back = post(f"{url}/runner/inbox", {"run_id": 1}, token="rt")["messages"]
+    assert back[0]["reply_to"] == ask and back[0]["body"] == "parseToken" and back[0]["id"] == reply
+    assert post(f"{url}/runner/message", {"from_run": 2, "to_run": 1, "body": "ora sì", "ask": True},
+                token="rt")["id"]
+
+    # l'owner vede tutto nei log di entrambi
+    assert "✉️ → #2" in say(url, "log 1", 3) and "✉️ ← #1" in say(url, "log 2", 4)
+
+    # niente messaggi verso run non in corso, a sé stessi, vuoti, o risposte a domande altrui
+    post(f"{url}/runner/update", {"run_id": 2, "status": "cancelled", "step": "agent"}, token="rt")
+    assert "non è in esecuzione" in post(f"{url}/runner/message", {"from_run": 1, "to_run": 2, "body": "x"},
+                                          token="rt")["error"]
+    assert post(f"{url}/runner/message", {"from_run": 1, "to_run": 1, "body": "x"}, token="rt")["http"] == 409
+    assert post(f"{url}/runner/inbox", {"run_id": 2}, token="rt")["http"] == 409
+
+
+def test_mailbox_limits(server, monkeypatch):
+    app, notifier, url = server
+    _two_running(app, url)
+    assert post(f"{url}/runner/message", {"from_run": 1, "to_run": 2, "body": "  "}, token="rt")["http"] == 409
+    assert post(f"{url}/runner/message", {"from_run": 1, "reply_to": 999, "body": "x"}, token="rt")["http"] == 409
+    monkeypatch.setattr(runs, "MSG_PER_RUN", 2)
+    for _ in range(2):
+        post(f"{url}/runner/message", {"from_run": 1, "to_run": 2, "body": "x" * 5000}, token="rt")
+    assert "limite di 2 messaggi" in post(f"{url}/runner/message", {"from_run": 1, "to_run": 2, "body": "x"},
+                                           token="rt")["error"]
+    assert max(len(m["body"]) for m in post(f"{url}/runner/inbox", {"run_id": 2}, token="rt")["messages"]) == 2000

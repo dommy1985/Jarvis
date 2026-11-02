@@ -27,6 +27,7 @@ import logging
 import os
 import pwd
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -40,6 +41,8 @@ from pathlib import Path
 
 from jarvis import i18n, providers
 from jarvis.i18n import t as tr
+from jarvis.redact import SECRET, mask  # noqa: F401  (SECRET: compat per chi lo importava da qui)
+from runner import mailbox as mail
 from jarvis.providers.base import QUOTA, last_result, tail  # noqa: F401 (tail, QUOTA: usati anche dai test)
 from jarvis.providers.claude import CLAUDE_LIMIT, RESET_EPOCH, RESET_TIME, claude_reset, command_rules  # noqa: F401
 
@@ -48,8 +51,6 @@ ROOT = Path(__file__).resolve().parent.parent
 # plan-revise, approved-plan. Il locale è quello di job["locale"] (vedi job_locale).
 LEGACY_LOCALE = "it"  # un server precedente all'i18n non manda job["locale"] e parlava sempre italiano
 LOG_FLUSH_SECONDS = 5  # righe di log verso jarvis: a gruppi
-SECRET = re.compile(r"ghp_\w{16,}|github_pat_\w{20,}|sk-[\w-]{20,}|AIza[\w-]{30,}|Bearer\s+\S+|"
-                    r"(?i:(?:token|password|passwd|secret|api[_-]?key)\s*[=:]\s*)\S+")
 MAX_DIFF = 80_000  # caratteri di diff passati al revisore
 SERIOUS = ("blocker", "major")  # severità che fanno partire il giro di correzione
 REVIEW_SCHEMA = {
@@ -172,7 +173,11 @@ def login_env() -> None:
             os.environ[key] = value
 
 
-def agent_env(hooks: Path = HOOKS) -> dict:
+BIN = JARVIS_HOME / "bin"  # jarvis-msg, nel PATH degli agenti che lavorano insieme ad altri
+MAILBOX: "mail.Mailbox | None" = None  # proxy locale della mailbox, avviato da main()
+
+
+def agent_env(hooks: Path = HOOKS, mailbox: dict | None = None) -> dict:
     """Ambiente per gli agenti: push, gh e credenziali git spenti (il push lo fa solo il runner).
 
     È una protezione contro gli errori, non un confine di sicurezza: un agente con la shell può
@@ -201,6 +206,9 @@ def agent_env(hooks: Path = HOOKS) -> dict:
         "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
         "GH_CONFIG_DIR": str(gh_config),
     })
+    if mailbox:  # solo l'esecutore, mai il revisore: token suo, valido finché il run è in corso
+        env.update({"JARVIS_MSG_URL": mailbox["url"], "JARVIS_MSG_TOKEN": mailbox["token"],
+                    "JARVIS_RUN_ID": str(mailbox["run_id"]), "PATH": f"{BIN}{os.pathsep}{env.get('PATH', '')}"})
     return env
 
 
@@ -236,6 +244,17 @@ class Api:
         except (TypeError, ValueError):
             self.max_parallel = 1
         return data["run"]
+
+    def mailbox(self, path: str, body: dict) -> dict:
+        """Rotte /runner/peers, /runner/message, /runner/inbox: un rifiuto di jarvis diventa MailboxError."""
+        try:
+            return self._post(path, body)
+        except urllib.error.HTTPError as e:
+            try:
+                error = json.load(e).get("error") or str(e)
+            except ValueError:
+                error = str(e)
+            raise mail.MailboxError(error) from None
 
     def heartbeat(self, run_id: int) -> bool:
         """Segnala che il run è vivo; True se l'owner ha chiesto di fermarlo."""
@@ -482,8 +501,6 @@ def git(cwd: Path, *args: str, step: str, timeout: int = 300) -> str:
 
 # --- log dal vivo: azioni dell'agente (mai il contenuto dei file) ---
 
-def mask(text: str) -> str:
-    return SECRET.sub("***", text)
 
 
 class LogFeed:
@@ -529,14 +546,23 @@ class LogFeed:
             self.api.log(self.run_id, lines)
 
 
+def mailbox_hook_command() -> str:
+    """Dopo ogni strumento i messaggi non letti entrano nel contesto (già incorniciati), per i provider che lo sanno fare."""
+    return f"{shlex.quote(str(BIN / 'jarvis-msg'))} inbox --hook"
+
+
 def agent_command(job: dict, prompt: str) -> list[str]:
     executor, project, limits = job["executor"], job["project"], job["limits"]
     if provider := providers.get(executor["cli"]):
-        return provider.build_exec_cmd(
+        cmd = provider.build_exec_cmd(
             executor, prompt, skip_permissions=bool(executor.get("skip_permissions")),
             timeout_minutes=limits["agent_timeout_minutes"],
             commands=[project["setup"], project["build"], project["test"],
-                      *(sub.get("test") for sub in job.get("submodules") or [])])
+                      *(sub.get("test") for sub in job.get("submodules") or []),
+                      "jarvis-msg" if job.get("mailbox") else None])
+        if job.get("mailbox") and "inbox_hook" in provider.capabilities:
+            cmd += provider.inbox_hook_args(mailbox_hook_command())
+        return cmd
     raise StepError("agent", tr("runner.unknown_cli", cli=executor["cli"]))
 
 
@@ -580,7 +606,8 @@ def build_prompt(job: dict) -> str:
         commands = tr("runner.commands_skip_permissions")
     else:
         allowed = provider.allowed_commands(
-            [project["setup"], project["build"], project["test"]], [sub["path"] for sub in job.get("submodules") or []])
+            [project["setup"], project["build"], project["test"], "jarvis-msg" if job.get("mailbox") else None],
+            [sub["path"] for sub in job.get("submodules") or []])
         commands = tr("runner.commands_allowed", allowed=", ".join(f"`{c}`" for c in allowed))
     extra = []
     for sub in job.get("submodules") or []:
@@ -592,6 +619,8 @@ def build_prompt(job: dict) -> str:
         extra.append(tr("runner.user_note", note=job["user_note"]))
     extra += project.get("agent_notes") or []
     suffix = i18n.prompt("task-suffix") if provider.uses_task_suffix else ""
+    if job.get("mailbox"):  # altri run possono lavorare insieme a questo: come scriversi
+        suffix += i18n.prompt("mailbox").replace("{run_id}", str(job["run_id"])).replace("{owner}", owner_name(job))
     if job.get("approved_plan"):
         suffix += i18n.prompt("approved-plan").replace("{owner}", owner_name(job)).replace("{plan}", job["approved_plan"])
     return ((i18n.prompt("task") + suffix)
@@ -905,7 +934,7 @@ def execute(job: dict, api: Api, run_agent=sh_stream, gh=sh, usage=None) -> None
         cli = job["executor"]["cli"]
         for attempt in (1, 2):
             code, out = run_agent(agent_command(job, prompt), cwd, limits["agent_timeout_minutes"] * 60 + 60,
-                                  agent_env(), check=stop_requested, on_line=feed.events(cli))
+                                  agent_env(mailbox=job.get("mailbox")), check=stop_requested, on_line=feed.events(cli))
             if code == 130:
                 raise Cancelled()
             save_output(run_id, what, out)
@@ -1390,7 +1419,15 @@ def execute_realign(job: dict, api: Api) -> None:
 
 def run_job(job: dict, api: Api) -> None:
     log.info("run %s: %s con %s", job["run_id"], job["task"]["external_id"], job["executor"]["name"])
-    {"realign": execute_realign, "plan": execute_plan}.get(job.get("kind"), execute)(job, api)
+    box = None
+    if MAILBOX and api.max_parallel > 1 and job.get("kind", "agent") in ("agent", "repair"):
+        box = MAILBOX.register(job["run_id"], job_locale(job), owner_name(job))
+        job["mailbox"] = box
+    try:
+        {"realign": execute_realign, "plan": execute_plan}.get(job.get("kind"), execute)(job, api)
+    finally:
+        if box:
+            MAILBOX.revoke(box["token"])
 
 
 class Pool:
@@ -1451,6 +1488,9 @@ def main(argv: list[str] | None = None) -> None:
     tunnel = Tunnel(env["JARVIS_SSH_HOST"], api, env["JARVIS_SSH_LOCAL_PORT"], env["JARVIS_SSH_REMOTE_PORT"])
     api.reconnect = tunnel.ensure
     pool = Pool(api)
+    global MAILBOX
+    mail.install_script(BIN)
+    MAILBOX = mail.Mailbox(api.mailbox)
 
     def on_term(*_):
         SHUTDOWN.set()
@@ -1479,6 +1519,7 @@ def main(argv: list[str] | None = None) -> None:
             left = pool.join(SHUTDOWN_JOIN_SECONDS)
             if left:
                 log.error("arresto: run ancora in corso %s, li segnerà il server al prossimo avvio", left)
+        MAILBOX.close()
         tunnel.close()
 
 

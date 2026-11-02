@@ -18,6 +18,7 @@ from jarvis.briefing import short_ref
 from jarvis.config import Config
 from jarvis.i18n import alternation, get_locale, messages, t, words
 from jarvis.outcomes import feedback_line
+from jarvis.redact import mask
 
 log = logging.getLogger(__name__)
 
@@ -307,6 +308,76 @@ def discard_plan(conn: sqlite3.Connection, run_id: int | None) -> str:
 def plans_waiting(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute("""SELECT r.id, r.executor, t.external_id, t.url FROM runs r JOIN tasks t ON t.id = r.task_id
                            WHERE r.kind = 'plan' AND r.plan_state = 'proposed' ORDER BY r.id""").fetchall()
+
+
+MSG_MAX_CHARS = 2000
+MSG_PER_RUN = 30  # messaggi che un run può mandare: un agente in loop non intasa gli altri
+
+
+def peers(conn: sqlite3.Connection, run_id: int) -> list[dict]:
+    """Gli altri run in esecuzione, a cui il run `run_id` può scrivere."""
+    _require_running(conn, run_id)
+    rows = conn.execute(
+        """SELECT r.id, COALESCE(r.project, t.project) AS project, t.external_id, t.title FROM runs r
+           JOIN tasks t ON t.id = r.task_id WHERE r.status = 'running' AND r.id != ? ORDER BY r.id""", (run_id,))
+    return [dict(r) for r in rows]
+
+
+def _require_running(conn: sqlite3.Connection, run_id: int) -> None:
+    row = conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
+    if row is None or row["status"] != "running":
+        raise RunError(t("runs.msg.not_running", run_id=run_id))
+
+
+def send_message(conn: sqlite3.Connection, from_run: int, to_run: int | None, body: str, reply_to: int | None = None,
+                 ask: bool = False) -> int:
+    """Messaggio da un run a un altro, entrambi in esecuzione. Finisce anche nel log di tutti e due (l'owner vede
+    tutto con "log"/"segui"). `ask`: chi scrive aspetta la risposta; un ask incrociato (l'altro aspetta già una
+    risposta da chi scrive) è rifiutato, altrimenti si aspetterebbero a vicenda."""
+    if to_run is None and reply_to is not None:  # "reply <msg>": il destinatario è chi l'ha mandato
+        row = conn.execute("SELECT from_run FROM run_messages WHERE id = ? AND to_run = ?",
+                           (reply_to, from_run)).fetchone()
+        if row is None:
+            raise RunError(t("runs.msg.bad_reply", msg_id=reply_to))
+        to_run = row["from_run"]
+    if to_run is None or from_run == to_run:
+        raise RunError(t("runs.msg.self"))
+    _require_running(conn, from_run)
+    _require_running(conn, to_run)
+    body = mask(str(body or "")).strip()[:MSG_MAX_CHARS]
+    if not body:
+        raise RunError(t("runs.msg.empty"))
+    if conn.execute("SELECT COUNT(*) FROM run_messages WHERE from_run = ?", (from_run,)).fetchone()[0] >= MSG_PER_RUN:
+        raise RunError(t("runs.msg.too_many", limit=MSG_PER_RUN))
+    if reply_to is not None and not conn.execute(
+            "SELECT 1 FROM run_messages WHERE id = ? AND to_run = ? AND from_run = ?",
+            (reply_to, from_run, to_run)).fetchone():
+        raise RunError(t("runs.msg.bad_reply", msg_id=reply_to))
+    if ask and conn.execute(
+            """SELECT 1 FROM run_messages a WHERE a.kind = 'ask' AND a.from_run = ? AND a.to_run = ?
+               AND NOT EXISTS (SELECT 1 FROM run_messages r WHERE r.reply_to = a.id)""",
+            (to_run, from_run)).fetchone():
+        raise RunError(t("runs.msg.cross_wait", run_id=to_run))
+    msg_id = conn.execute(
+        """INSERT INTO run_messages (from_run, to_run, kind, reply_to, body, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (from_run, to_run, "ask" if ask else "note", reply_to, body, _iso(_now()))).lastrowid
+    short = body.replace("\n", " ")[:200]
+    add_log(conn, from_run, [t("runs.msg.log_sent", msg_id=msg_id, run_id=to_run, body=short)])
+    add_log(conn, to_run, [t("runs.msg.log_received", msg_id=msg_id, run_id=from_run, body=short)])
+    return msg_id
+
+
+def inbox(conn: sqlite3.Connection, run_id: int) -> list[dict]:
+    """Messaggi non ancora letti per `run_id`, segnati come letti."""
+    _require_running(conn, run_id)
+    rows = [dict(r) for r in conn.execute(
+        """SELECT id, from_run, kind, reply_to, body, created_at FROM run_messages
+           WHERE to_run = ? AND read_at IS NULL ORDER BY id""", (run_id,))]
+    if rows:
+        conn.execute(f"UPDATE run_messages SET read_at = ? WHERE id IN ({','.join('?' * len(rows))})",
+                     (_iso(_now()), *(r["id"] for r in rows)))
+    return rows
 
 
 def add_log(conn: sqlite3.Connection, run_id: int, lines: list) -> None:

@@ -79,7 +79,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._authorized():
             return
-        if self.path not in ("/ingest", "/plan", "/briefing/sent", "/reply", "/runner/claim", "/runner/update"):
+        if self.path not in ("/ingest", "/plan", "/briefing/sent", "/reply", "/runner/claim", "/runner/update",
+                             "/runner/peers", "/runner/message", "/runner/inbox"):
             return self._send(404, {"error": "not found"})
         length = int(self.headers.get("Content-Length") or 0)
         if length > MAX_BODY:
@@ -109,6 +110,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._claim(payload)
         if self.path == "/runner/update":
             return self._run_update(payload)
+        if self.path in ("/runner/peers", "/runner/message", "/runner/inbox"):
+            return self._mailbox(payload)
         self._plan(payload)
 
     def _claim(self, payload: dict):
@@ -127,6 +130,25 @@ class Handler(BaseHTTPRequestHandler):
             if (notice := job.pop("dependency_notice", None)) and self.app.notifier:
                 self.app.notifier.send(notice)
         self._send(200, {"run": job, "max_parallel": int(cfg.runner.get("max_parallel") or 1)})
+
+    def _mailbox(self, payload: dict):
+        """Mailbox fra run attivi: il runner fa da tramite per gli agenti (che non vedono mai il suo token)."""
+        try:
+            with self.app.lock:
+                if self.path == "/runner/peers":
+                    return self._send(200, {"peers": runs.peers(self.app.conn, int(payload["run_id"]))})
+                if self.path == "/runner/inbox":
+                    return self._send(200, {"messages": runs.inbox(self.app.conn, int(payload["run_id"]))})
+                reply_to = payload.get("reply_to")
+                to_run = payload.get("to_run")
+                msg_id = runs.send_message(self.app.conn, int(payload["from_run"]), int(to_run) if to_run else None,
+                                           str(payload.get("body") or ""), int(reply_to) if reply_to else None,
+                                           bool(payload.get("ask")))
+                return self._send(200, {"id": msg_id})
+        except runs.RunError as e:
+            return self._send(409, {"error": str(e)})
+        except (KeyError, TypeError, ValueError) as e:
+            return self._send(400, {"error": str(e)})
 
     def _run_update(self, payload: dict):
         try:
