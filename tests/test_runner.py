@@ -1041,3 +1041,131 @@ def test_cli_not_installed_fails_before_starting_and_asks_for_the_fallback(repo,
     final = api.updates[-1]
     assert (final["status"], final["rate_limited"]) == ("failed", True) and "claude non pronto" in final["error"]
     assert {"cli": "claude", "kind": "rate_limited", "reset_at": None} in final["quota"]
+
+
+# --- run in parallelo ---
+
+class _PoolApi:
+    """Api finta: dà i job in coda finché ce ne sono e registra l'elenco dei run attivi a ogni claim."""
+
+    def __init__(self, jobs, max_parallel=2, pending_ok=True):
+        self.jobs, self.max_parallel, self.pending_ok = list(jobs), 1, pending_ok
+        self.server_max = max_parallel
+        self.claims = []
+
+    def flush_pending(self):
+        return self.pending_ok
+
+    def claim(self, active):
+        self.claims.append(sorted(active))
+        self.max_parallel = self.server_max
+        return self.jobs.pop(0) if self.jobs else None
+
+
+def test_pool_runs_up_to_max_parallel_jobs_together():
+    import threading
+    release, started = threading.Event(), []
+
+    def work(job, api):
+        started.append(job["run_id"])
+        release.wait(5)
+
+    api = _PoolApi([{"run_id": 1}, {"run_id": 2}, {"run_id": 3}])
+    pool = runner.Pool(api, run=work)
+    assert pool.claim()["run_id"] == 1  # prima risposta: il server dice max_parallel 2
+    assert pool.claim()["run_id"] == 2
+    assert pool.free() is False and pool.claim() is None  # niente terzo claim: posti finiti
+    assert api.claims == [[], [1]]
+    release.set()
+    assert pool.join(5) == []
+    assert pool.free() is True and pool.wake.is_set()
+    assert pool.claim()["run_id"] == 3 and api.claims[-1] == []
+    pool.join(5)
+
+
+def test_pool_stays_at_one_run_with_an_old_server():
+    import threading
+    release = threading.Event()
+    api = _PoolApi([{"run_id": 1}, {"run_id": 2}], max_parallel=1)  # il server vecchio non manda max_parallel
+    pool = runner.Pool(api, run=lambda job, a: release.wait(5))
+    pool.claim()
+    assert pool.free() is False and pool.claim() is None
+    release.set()
+    pool.join(5)
+
+
+def test_pool_does_not_claim_with_outcomes_still_pending():
+    api = _PoolApi([{"run_id": 1}], pending_ok=False)
+    assert runner.Pool(api, run=lambda job, a: None).claim() is None and api.claims == []
+
+
+def test_pool_releases_the_slot_only_after_the_final_update():
+    """Il run esce dagli attivi solo a esito consegnato (o in PENDING): se no il server lo vedrebbe orfano."""
+    seen = []
+    api = _PoolApi([{"run_id": 7}])
+    pool = runner.Pool(api, run=lambda job, a: seen.append(dict(pool.active)))
+    pool.claim()
+    pool.join(5)
+    assert 7 in seen[0] and pool.active == {}
+
+
+def test_api_claim_reads_max_parallel_and_sends_active(monkeypatch):
+    api = runner.Api("http://x", "t")
+    bodies = []
+
+    def fake(path, body):
+        bodies.append(body)
+        return {"run": None, "max_parallel": 2} if len(bodies) == 1 else {"run": None}
+
+    monkeypatch.setattr(api, "_post", fake)
+    api.claim([3, 1])
+    assert bodies[0] == {"active": [1, 3]} and api.max_parallel == 2
+    api.claim([])
+    assert api.max_parallel == 1  # risposta senza max_parallel (server vecchio): un run alla volta
+
+
+def test_shutdown_during_agent_fails_the_run_and_keeps_the_worktree(repo, tmp_path, monkeypatch):
+    """Arresto del runner (SIGTERM), non "ferma N": il run risulta fallito e si può riprendere, worktree compreso."""
+    repo, _ = repo
+    monkeypatch.setattr(runner, "SHUTDOWN", __import__("threading").Event())
+    api = Api()
+
+    def agent(cmd, cwd, timeout, env, check=None, on_line=None):
+        runner.SHUTDOWN.set()
+        return (130, "") if check and check() else (0, "{}")
+
+    runner.execute(job(repo, tmp_path), api, run_agent=agent, gh=fake_gh([]))
+    last = api.updates[-1]
+    assert (last["status"], last["step"]) == ("failed", "agent")
+    from jarvis import i18n
+    assert last["error"] in {i18n.messages(c)["runner.err.shutdown"] for c in ("it", "en")}
+    assert (tmp_path / "wt" / "novainfo-7").exists()
+
+
+def test_shutdown_stops_running_jobs(monkeypatch, tmp_path):
+    """SIGTERM: i run in corso vedono lo stop al prossimo controllo, come con "ferma N"."""
+    monkeypatch.setattr(runner, "SHUTDOWN", __import__("threading").Event())
+    monkeypatch.setattr(runner, "CHECK_SECONDS", 1)
+    runner.SHUTDOWN.set()
+    code, _ = runner.sh("sleep 30", tmp_path, 60, check=lambda: runner.SHUTDOWN.is_set())
+    assert code == 130
+
+
+def test_repo_lock_is_shared_by_worktrees_of_the_same_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run("git", "init", "-q", "-b", "main", cwd=repo)
+    run("git", "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "i", cwd=repo)
+    run("git", "worktree", "add", "-q", str(tmp_path / "wt"), cwd=repo)
+    assert runner.repo_lock(repo) is runner.repo_lock(tmp_path / "wt")
+    other = tmp_path / "other"
+    other.mkdir()
+    run("git", "init", "-q", cwd=other)
+    assert runner.repo_lock(other) is not runner.repo_lock(repo)
+
+
+def test_agent_env_disables_git_auto_gc(tmp_path):
+    env = runner.agent_env(tmp_path / "hooks")
+    keys = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+    assert keys["gc.auto"] == "0" and keys["credential.helper"] == ""
+    assert (tmp_path / "hooks" / "pre-push").stat().st_mode & 0o111

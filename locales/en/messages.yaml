@@ -247,6 +247,13 @@ runs.never_seen: never seen
 runs.offline: '⚠️ Runner offline ({when}): machine off or runner stopped. Runs start when it is back.'
 runs.stale_error: no news from the runner for {hours:g} hours
 runs.orphan_error: the runner restarted or stopped during the run
+runs.wait.full: all runner slots busy
+runs.wait.parallel_safe: project never runs alongside others
+runs.wait.same_project: same project already running
+runs.wait.same_parent: same PR already being worked on
+runs.wait.cli: "{cli} cannot run two sessions at once"
+runs.wait.quota: "{cli} just hit a rate limit"
+runs.err.which_run: "{n} runs are active, which one? {runs}"
 notif.who_realign: submodule realignment
 notif.who_repair: '{executor} (repair of run #{parent})'
 notif.tests_passed: tests ok
@@ -427,6 +434,7 @@ runner.err.nothing_in_sub: nothing to commit in {path} besides local files
 runner.err.nothing: nothing to commit besides local files
 runner.err.no_plan: the agent did not write any plan
 runner.err.runner: 'runner error: {error}'
+runner.err.shutdown: the runner was stopped or restarted during the run
 runner.note.local_missing: 'local file not found, not copied: `{label}{name}`'
 runner.note.transient: 'the agent''s first attempt failed with a temporary error: {error}'
 runner.note.reviewer_edited: 'the reviewer modified files in `{name}`: changes reverted'

@@ -11,7 +11,7 @@ POST /briefing/sent  {"date", "message_id"}: il briefing è stato inviato su Tel
 POST /reply    messaggio Telegram del topic Jarvis: {"chat_id", "thread_id", "from_id", "message_id", "text"}
                "briefing" rimanda il briefing di oggi, "aiuto" l'elenco dei comandi,
                "vai N" mette in coda per il runner, "coda" ne mostra lo stato
-POST /runner/claim   il runner sul Mac chiede il prossimo run: {"run": {...}} o {"run": null}
+POST /runner/claim   {"active": [run_id...]}: il runner chiede un altro run: {"run": {...} o null, "max_parallel"}
 POST /runner/update  {"run_id", "status"?, "step"?, "pr_url"?, ...}: progressi ed esito del run
 
 /plan e /reply restituiscono `message` ({chat_id, thread_id, text, reply_to_message_id}) da inviare
@@ -106,23 +106,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"message": self.app.message(text, int(payload.get("message_id") or 0) or None),
                                         "is_briefing": False})
         if self.path == "/runner/claim":
-            return self._claim()
+            return self._claim(payload)
         if self.path == "/runner/update":
             return self._run_update(payload)
         self._plan(payload)
 
-    def _claim(self):
+    def _claim(self, payload: dict):
         cfg = self.app.cfg
         with self.app.lock:
             checks.record(self.app.conn, "runner_seen", utc_now())
-            stale = runs.expire_orphaned(self.app.conn) + runs.expire_stale(self.app.conn, cfg.runner["stale_hours"])
+            active = payload.get("active") if isinstance(payload.get("active"), list) else []
+            stale = (runs.expire_orphaned(self.app.conn, [i for i in active if isinstance(i, int)])
+                     + runs.expire_stale(self.app.conn, cfg.runner["stale_hours"]))
             job = runs.claim(self.app.conn, cfg)
         for run_id in stale:
             self.app.notify_run(run_id)
         if job:
             log.info("run %s al runner: %s %s", job["run_id"], job["executor"]["name"], job["task"]["external_id"])
             self.app.notify_run(job["run_id"])
-        self._send(200, {"run": job})
+        self._send(200, {"run": job, "max_parallel": int(cfg.runner.get("max_parallel") or 1)})
 
     def _run_update(self, payload: dict):
         try:
@@ -211,7 +213,7 @@ class Handler(BaseHTTPRequestHandler):
         if word in words("queue_words") or word in words("clear_words"):
             with self.app.lock:
                 cleared = runs.clear(self.app.conn) if word in words("clear_words") else None
-                text = runs.status_text(self.app.conn, checks.get(self.app.conn, "runner_seen"))
+                text = runs.status_text(self.app.conn, checks.get(self.app.conn, "runner_seen"), self.app.cfg)
             if cleared is not None:
                 text = t("server.cleared", count=cleared) + text
             return self._send(200, {"message": self.app.message(text, message_id), "is_briefing": False})
@@ -225,7 +227,7 @@ class Handler(BaseHTTPRequestHandler):
             with self.app.lock:
                 try:
                     reply = plan_cmd()
-                    reply += "\n\n" + runs.status_text(self.app.conn, checks.get(self.app.conn, "runner_seen"))
+                    reply += "\n\n" + runs.status_text(self.app.conn, checks.get(self.app.conn, "runner_seen"), self.app.cfg)
                 except runs.RunError as e:
                     reply = t("server.warn", error=html.escape(str(e), quote=False))
             return self._send(200, {"message": self.app.message(reply, message_id), "is_briefing": False})
@@ -239,7 +241,7 @@ class Handler(BaseHTTPRequestHandler):
                     if r.group(2) and executor is None:
                         raise runs.RunError(t("err.unknown_executor", name=r.group(2).strip()))
                     reply = runs.repair(self.app.conn, self.app.cfg, int(r.group(1)), executor)
-                    reply += "\n\n" + runs.status_text(self.app.conn, checks.get(self.app.conn, "runner_seen"))
+                    reply += "\n\n" + runs.status_text(self.app.conn, checks.get(self.app.conn, "runner_seen"), self.app.cfg)
                 except runs.RunError as e:
                     reply = t("server.warn", error=html.escape(str(e), quote=False))
             return self._send(200, {"message": self.app.message(reply, message_id), "is_briefing": False})
@@ -393,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
                     planning = any(t("runs.planning_first") in d for d in done)
                     text = (t("server.queued_plan" if planning else "server.queued",
                               done=html.escape(", ".join(done), quote=False))
-                            + runs.status_text(self.app.conn, checks.get(self.app.conn, "runner_seen")))
+                            + runs.status_text(self.app.conn, checks.get(self.app.conn, "runner_seen"), self.app.cfg))
         # la chiamata a GitHub sta fuori dal lock (non rientrante), che blocca runner e /reply
         owner = self.app.cfg.owner_github
         for repo, num, task_id in to_assign if self.app.github and owner else []:

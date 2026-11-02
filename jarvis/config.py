@@ -16,6 +16,7 @@ RUNNER_DEFAULTS = {
     "agent_timeout_minutes": 60,
     "test_timeout_minutes": 45,
     "stale_hours": 3,  # run senza notizie dal runner oltre questo limite: fallito
+    "max_parallel": 1,  # run eseguiti insieme dal runner (vedi runs.can_start)
 }
 
 DEFAULT_OWNER_NAME = "Owner"

@@ -9,7 +9,7 @@ from collections.abc import Callable, Sequence
 
 from jarvis.i18n import t
 
-CAPABILITIES = ("execute", "plan_structured", "review", "quota")
+CAPABILITIES = ("execute", "plan_structured", "review", "quota", "concurrent")  # concurrent: più sessioni insieme
 QUOTA = re.compile(r"usage limit|rate.?limit|quota|RESOURCE_EXHAUSTED|\b429\b|limit reached|hit your .{0,20}limit",
                    re.IGNORECASE)
 

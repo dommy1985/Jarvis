@@ -39,6 +39,7 @@ runner:
   agent_timeout_minutes: 60
   test_timeout_minutes: 45
   stale_hours: 3
+  max_parallel: 1           # runs at once on the runner; parallel only across projects (see runner/README.md)
 
 # cli: claude | agy | copilot. family is used to pick a reviewer from another family.
 executors:
@@ -74,7 +75,7 @@ outcomes:
   check_minutes: 10
 
 # Optional per project: base_branch, plan_first, paused, redact_description, setup, build, test, copy_files,
-# submodules, agent_notes, override (task type -> executor).
+# submodules, agent_notes, override (task type -> executor), parallel_safe (false: never alongside other runs).
 projects:
   my-app:
     path: ~/code/my-app

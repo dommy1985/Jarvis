@@ -203,13 +203,23 @@ def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: li
     return done, to_assign
 
 
+def _only_running(conn: sqlite3.Connection) -> int | None:
+    """Il run in corso quando l'owner non dice il numero: None se non ce n'è nessuno; con più run in corso il numero
+    serve, e l'errore elenca quelli attivi."""
+    rows = conn.execute("""SELECT r.id, t.external_id FROM runs r JOIN tasks t ON t.id = r.task_id
+                           WHERE r.status = 'running' ORDER BY r.id""").fetchall()
+    if len(rows) > 1:
+        raise RunError(t("runs.err.which_run", n=len(rows),
+                         runs=", ".join(f"#{r['id']} {html.escape(short_ref(r['external_id']))}" for r in rows)))
+    return rows[0]["id"] if rows else None
+
+
 def stop(conn: sqlite3.Connection, run_id: int | None) -> str:
     """"ferma N": un run in coda viene annullato subito, uno in corso al prossimo controllo del runner."""
     if run_id is None:
-        row = conn.execute("SELECT id FROM runs WHERE status = 'running' ORDER BY id DESC LIMIT 1").fetchone()
-        if row is None:
+        run_id = _only_running(conn)
+        if run_id is None:
             raise RunError(t("runs.err.none_running"))
-        run_id = row["id"]
     run = conn.execute("SELECT id, status, briefing_item_id FROM runs WHERE id = ?", (run_id,)).fetchone()
     if run is None:
         raise RunError(t("runs.err.no_run", run_id=run_id))
@@ -302,8 +312,9 @@ def prune_logs(conn: sqlite3.Connection) -> None:
 def log_run(conn: sqlite3.Connection, run_id: int | None) -> sqlite3.Row:
     """Il run indicato, o quello in corso, o l'ultimo che ha scritto log."""
     if run_id is None:
-        run = (conn.execute("SELECT * FROM runs WHERE status = 'running' ORDER BY id DESC LIMIT 1").fetchone()
-               or conn.execute("""SELECT * FROM runs WHERE id = (SELECT MAX(run_id) FROM run_log)""").fetchone())
+        running = _only_running(conn)
+        run = (conn.execute("SELECT * FROM runs WHERE id = ?", (running,)).fetchone() if running else None) or (
+               conn.execute("""SELECT * FROM runs WHERE id = (SELECT MAX(run_id) FROM run_log)""").fetchone())
         if run is None:
             raise RunError(t("runs.err.no_log"))
         return run
@@ -412,26 +423,119 @@ def expire_stale(conn: sqlite3.Connection, hours: float) -> list[int]:
     return _fail_running(conn, rows, t("runs.stale_error", hours=hours))
 
 
-def expire_orphaned(conn: sqlite3.Connection) -> list[int]:
-    """Il runner esegue un run alla volta e chiede lavoro solo quando è libero: se arriva un claim mentre il server
-    ha un run 'running', quel run è orfano (runner riavviato o crollato). Fallito subito, la voce torna approvata."""
-    rows = conn.execute("SELECT id, briefing_item_id FROM runs WHERE status = 'running'").fetchall()
+def expire_orphaned(conn: sqlite3.Connection, active: list[int] | None = None) -> list[int]:
+    """Il runner chiede lavoro con l'elenco dei run che sta ancora eseguendo (`active`): un run 'running' che non è
+    nell'elenco è orfano (runner riavviato o crollato), fallito subito e la voce torna approvata. Un runner vecchio
+    non manda l'elenco e chiede lavoro solo quando è libero: `active` vuoto, ogni run 'running' è orfano."""
+    keep = {int(i) for i in active or []}
+    rows = [r for r in conn.execute("SELECT id, briefing_item_id FROM runs WHERE status = 'running'").fetchall()
+            if r["id"] not in keep]
     return _fail_running(conn, rows, t("runs.orphan_error"))
 
 
-def claim(conn: sqlite3.Connection, cfg: Config) -> dict | None:
-    """Prende il run in coda più vecchio e lo passa a 'running'. Una sola esecuzione alla volta."""
-    if conn.execute("SELECT 1 FROM runs WHERE status = 'running'").fetchone():
+RATE_LIMIT_WAIT_MINUTES = 10  # una CLI che ha appena preso un rate limit in un run in corso non parte in un altro run
+
+
+def _family(cfg: Config, project: str | None) -> set:
+    """Il progetto, i suoi submodule e il progetto che lo include: lavorano sugli stessi repo."""
+    if project is None:
+        return set()
+    family = {project, *((cfg.projects.get(project, {}).get("submodules") or {}).values())}
+    parent = cfg.submodule_parent(project)
+    if parent:
+        family.add(parent[0])
+    return family
+
+
+def _cli(cfg: Config, executor: str | None) -> str | None:
+    return cfg.raw["executors"].get(executor or "", {}).get("cli")
+
+
+def _running(conn: sqlite3.Connection, cfg: Config) -> list[dict]:
+    """I run in corso, con quello che serve a can_start."""
+    since = _iso(_now() - timedelta(minutes=RATE_LIMIT_WAIT_MINUTES))
+    rows = conn.execute(
+        """SELECT r.id, r.kind, r.executor, r.parent_run_id, COALESCE(r.project, t.project) AS project,
+                  EXISTS (SELECT 1 FROM quota_events q WHERE q.run_id = r.id AND q.kind = 'rate_limited'
+                          AND q.observed_at >= ?) AS rate_limited
+           FROM runs r JOIN tasks t ON t.id = r.task_id WHERE r.status = 'running'""", (since,)).fetchall()
+    return [dict(r) | {"cli": _cli(cfg, r["executor"]) if r["kind"] != "realign" else None} for r in rows]
+
+
+def can_start(cfg: Config, run: dict, running: list[dict]) -> str | None:
+    """None se il run in coda può partire accanto a quelli in corso, altrimenti il motivo dell'attesa
+    (chiave in runs.wait.*). Deterministico, niente LLM.
+
+    `run` ha: kind, project (quello in cui gira, dopo submodule_parent), cli (None se non lancia agenti),
+    parent_run_id. Ogni voce di `running` ha anche id e rate_limited."""
+    if not running:
         return None
-    row = conn.execute(
-        """SELECT r.id, r.executor, r.model, r.kind, r.parent_run_id, r.feedback, r.fallback_from, r.base_branch,
+    if len(running) >= int(cfg.runner.get("max_parallel") or 1):
+        return "full"
+    projects = cfg.projects
+    if not projects.get(run["project"], {}).get("parallel_safe", True) \
+            or any(not projects.get(r["project"], {}).get("parallel_safe", True) for r in running):
+        return "parallel_safe"
+    family = _family(cfg, run["project"])
+    if any(r["project"] in family or run["project"] in _family(cfg, r["project"]) for r in running):
+        return "same_project"
+    if run.get("parent_run_id") and any(run["parent_run_id"] in (r["id"], r["parent_run_id"]) for r in running):
+        return "same_parent"
+    cli = run.get("cli")
+    if cli:
+        same = [r for r in running if r["cli"] == cli]
+        if same and not providers.can(cli, "concurrent"):
+            return "cli"
+        if any(r["rate_limited"] for r in same):
+            return "quota"
+    return None
+
+
+def _effective_executor(conn: sqlite3.Connection, cfg: Config, row: sqlite3.Row) -> str:
+    """L'esecutore con cui il run partirebbe: come _avoid_exhausted, ma senza scrivere niente."""
+    if row["kind"] not in ("agent", "repair", "plan") or not _avoided(conn, cfg, row["executor"]):
+        return row["executor"]
+    return _next_executor(conn, cfg, row["executor"], {row["executor"]}) or row["executor"]
+
+
+def _candidate(cfg: Config, conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    parent = cfg.submodule_parent(row["task_project"])
+    executor = _effective_executor(conn, cfg, row)
+    return {"kind": row["kind"], "project": parent[0] if parent else row["project"],
+            "cli": _cli(cfg, executor) if row["kind"] != "realign" else None, "parent_run_id": row["parent_run_id"]}
+
+
+def waiting(conn: sqlite3.Connection, cfg: Config) -> dict[int, str]:
+    """run_id -> motivo (già tradotto) dei run in coda che adesso non possono partire, per "coda"."""
+    running = _running(conn, cfg)
+    out = {}
+    if not running:
+        return out
+    for row in conn.execute(CLAIM_SELECT + " ORDER BY r.id").fetchall():
+        candidate = _candidate(cfg, conn, row)
+        reason = can_start(cfg, candidate, running)
+        if reason:
+            out[row["id"]] = t(f"runs.wait.{reason}", cli=candidate["cli"] or "")
+    return out
+
+
+CLAIM_SELECT = """SELECT r.id, r.executor, r.model, r.kind, r.parent_run_id, r.feedback, r.fallback_from, r.base_branch,
                   r.plan_of, r.plan_note, r.owner_note,
                   t.source, t.external_id,
                   COALESCE(r.project, t.project) AS project, t.project AS task_project,
                   COALESCE(i.proposed_type, t.type) AS type, t.title, t.description, t.url, t.labels
            FROM runs r JOIN tasks t ON t.id = r.task_id LEFT JOIN briefing_items i ON i.id = r.briefing_item_id
-           WHERE r.status = 'queued' ORDER BY r.id LIMIT 1"""
-    ).fetchone()
+           WHERE r.status = 'queued'"""
+
+
+def claim(conn: sqlite3.Connection, cfg: Config) -> dict | None:
+    """Prende il run in coda più vecchio che può partire accanto a quelli in corso (can_start, al massimo
+    runner.max_parallel insieme) e lo passa a 'running'."""
+    running = _running(conn, cfg)
+    if len(running) >= int(cfg.runner.get("max_parallel") or 1):
+        return None
+    row = next((r for r in conn.execute(CLAIM_SELECT + " ORDER BY r.id").fetchall()
+                if can_start(cfg, _candidate(cfg, conn, r), running) is None), None)
     if row is None:
         return None
     now = _iso(_now())
@@ -806,7 +910,7 @@ def _review_line(review: dict) -> str:
     return t("notif.review_summary", who=who, count=len(issues), serious=serious, fixed=fixed)
 
 
-def status_text(conn: sqlite3.Connection, runner_seen: str | None) -> str:
+def status_text(conn: sqlite3.Connection, runner_seen: str | None, cfg: Config | None = None) -> str:
     rows = conn.execute(
         """SELECT r.*, t.external_id, t.url, t.title FROM runs r JOIN tasks t ON t.id = r.task_id
            WHERE r.status IN ('queued', 'running') OR r.finished_at >= ? OR r.plan_state = 'proposed'
@@ -814,6 +918,7 @@ def status_text(conn: sqlite3.Connection, runner_seen: str | None) -> str:
         (_iso(_now() - timedelta(hours=24)),),
     ).fetchall()
     icons = {"queued": "⏳", "running": "▶️", "pr_open": "✅", "done": "🏁", "failed": "❌", "cancelled": "⏹"}
+    waits = waiting(conn, cfg) if cfg else {}
     lines = [t("status.title")]
     if runner_seen:
         lines[0] += t("status.runner_seen", time=datetime.fromisoformat(runner_seen).astimezone().strftime(t("fmt.time_day")))
@@ -821,7 +926,8 @@ def status_text(conn: sqlite3.Connection, runner_seen: str | None) -> str:
         lines[0] += t("status.runner_never")
     for r in rows:
         ref = f'<a href="{html.escape(r["url"], quote=True)}">{html.escape(short_ref(r["external_id"]))}</a>'
-        extra = r["pr_url"] if r["status"] in ("pr_open", "done") else (r["step"] if r["status"] == "running" else "")
+        extra = r["pr_url"] if r["status"] in ("pr_open", "done") else (r["step"] if r["status"] == "running"
+                                                                         else waits.get(r["id"], ""))
         icon = icons.get(r["status"], "?")
         if r["kind"] == "plan":
             icon = "📝" if r["status"] == "done" and r["plan_state"] == "proposed" else icon

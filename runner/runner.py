@@ -1,7 +1,7 @@
 """Runner Jarvis sul Mac (fase 2): prende un run dalla coda sul VPS, lo esegue in un worktree, apre la PR draft.
 
 Il Mac non è esposto: il runner raggiunge jarvis con un tunnel SSH (127.0.0.1:8090 sul VPS) e chiede
-lavoro con POST /runner/claim. Un run alla volta:
+lavoro con POST /runner/claim. Fino a `max_parallel` run insieme (lo decide il server), ognuno in un thread:
 
   worktree (agent/<id> da origin/<default>) -> copia file locali -> setup -> agente (claude o agy)
   -> build e test -> commit -> push del branch -> PR draft con gh -> rimozione del worktree
@@ -74,6 +74,8 @@ LOCAL_PORT = 8090
 POLL_SECONDS = 60
 AGENT_RETRY_SECONDS = 30
 CHECK_SECONDS = 30
+SHUTDOWN_JOIN_SECONDS = 120  # all'arresto i run in corso hanno questo tempo per fermarsi e mandare l'esito
+SHUTDOWN = threading.Event()  # SIGTERM: i run in corso si fermano al prossimo controllo, come con "ferma N"
 HOOKS = JARVIS_HOME / "hooks"
 TAIL = 40
 DEFAULT_OWNER = "Owner"  # un server vecchio non manda job["owner"]
@@ -178,17 +180,21 @@ def agent_env(hooks: Path = HOOKS) -> dict:
     """
     (hooks / "pre-push").parent.mkdir(parents=True, exist_ok=True)
     hook = hooks / "pre-push"
-    if not hook.exists():
-        hook.write_text("#!/bin/sh\necho 'push disabilitato: lo fa il runner Jarvis' >&2\nexit 1\n")
-        hook.chmod(0o755)
+    if not hook.exists():  # scritto in modo atomico: due run in parallelo possono arrivare qui insieme
+        tmp = hook.with_name(f".pre-push.{os.getpid()}.{threading.get_ident()}")
+        tmp.write_text("#!/bin/sh\necho 'push disabilitato: lo fa il runner Jarvis' >&2\nexit 1\n")
+        tmp.chmod(0o755)
+        os.replace(tmp, hook)
     gh_config = hooks.parent / "gh-empty"
     gh_config.mkdir(parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items()
            if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK")}
     env.update({
-        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_COUNT": "3",
         "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": str(hooks),
         "GIT_CONFIG_KEY_1": "credential.helper", "GIT_CONFIG_VALUE_1": "",
+        # niente auto-gc: con più run in parallelo un gc partito in un worktree bloccherebbe gli altri
+        "GIT_CONFIG_KEY_2": "gc.auto", "GIT_CONFIG_VALUE_2": "0",
         "GIT_SSH_COMMAND": "sh -c 'echo \"rete git disabilitata dal runner Jarvis\" >&2; exit 1'",
         "GIT_TERMINAL_PROMPT": "0",
         # Claude: dopo ogni comando la shell torna nella root del worktree (niente "cd" che resta appiccicato).
@@ -205,6 +211,8 @@ class Api:
         self.url, self.token = url.rstrip("/"), token
         self.pending, self.retry_seconds = pending, retry_seconds
         self.reconnect = None  # riapre il tunnel SSH prima di un nuovo tentativo
+        self.max_parallel = 1  # dall'ultima risposta al claim; un server vecchio non lo manda: un run alla volta
+        self._pending_lock = threading.Lock()  # PENDING: append dai worker, flush dal loop principale
 
     def _post(self, path: str, body: dict) -> dict:
         req = urllib.request.Request(self.url + path, data=json.dumps(body).encode(),
@@ -220,8 +228,14 @@ class Api:
         except (urllib.error.URLError, OSError):
             return False
 
-    def claim(self) -> dict | None:
-        return self._post("/runner/claim", {})["run"]
+    def claim(self, active: list[int] | None = None) -> dict | None:
+        """Chiede un run, dicendo quali sta ancora eseguendo (gli altri 'running' sul server sono orfani)."""
+        data = self._post("/runner/claim", {"active": sorted(active or [])})
+        try:
+            self.max_parallel = max(1, int(data.get("max_parallel") or 1))
+        except (TypeError, ValueError):
+            self.max_parallel = 1
+        return data["run"]
 
     def heartbeat(self, run_id: int) -> bool:
         """Segnala che il run è vivo; True se l'owner ha chiesto di fermarlo."""
@@ -260,7 +274,7 @@ class Api:
                     self.reconnect()
         if final:
             self.pending.parent.mkdir(parents=True, exist_ok=True)
-            with self.pending.open("a+") as f:
+            with self._pending_lock, self.pending.open("a+") as f:
                 f.seek(0, os.SEEK_END)
                 if f.tell():  # riga troncata da un crash: senza a capo il nuovo esito le si incollerebbe
                     f.seek(f.tell() - 1)
@@ -274,6 +288,10 @@ class Api:
 
     def flush_pending(self) -> bool:
         """Consegna gli esiti in sospeso; True se non ne resta nessuno (solo allora il runner può chiedere lavoro)."""
+        with self._pending_lock:
+            return self._flush_pending()
+
+    def _flush_pending(self) -> bool:
         if not self.pending.exists():
             return True
         left = []
@@ -314,8 +332,13 @@ class Tunnel:
     def __init__(self, host: str, api: Api, local_port: int = LOCAL_PORT, remote_port: int = LOCAL_PORT):
         self.host, self.api, self.proc = host, api, None
         self.local_port, self.remote_port = local_port, remote_port
+        self._lock = threading.Lock()  # più worker possono chiedere di riaprirlo insieme
 
     def ensure(self) -> bool:
+        with self._lock:
+            return self._ensure()
+
+    def _ensure(self) -> bool:
         if self.api.healthy():
             return True
         if not self.host:
@@ -422,8 +445,36 @@ def sh_stream(cmd: list[str] | str, cwd: Path, timeout: int, env: dict | None = 
     return code, "".join(out) + "".join(err) + note
 
 
+SHARED_GIT = ("fetch", "worktree", "branch", "submodule", "remote", "gc", "prune")  # toccano lo stato comune del repo
+_repo_locks: dict[str, threading.RLock] = {}
+_repo_locks_guard = threading.Lock()
+
+
+def repo_lock(cwd: Path) -> threading.RLock:
+    """Un lock per repo (la cartella .git comune a tutti i suoi worktree): due run in parallelo sullo stesso repo,
+    o su un submodule incluso da due progetti, non fanno fetch o worktree add/remove insieme."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=cwd, capture_output=True, text=True,
+                             timeout=30).stdout.strip()
+        key = str((Path(cwd) / out).resolve()) if out else str(Path(cwd).resolve())
+    except (OSError, subprocess.SubprocessError):
+        key = str(Path(cwd).resolve())
+    with _repo_locks_guard:
+        return _repo_locks.setdefault(key, threading.RLock())
+
+
+def git_sh(args: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
+    """git senza auto-gc (un gc partito in un worktree bloccherebbe l'altro run), col lock di repo per i comandi
+    che toccano lo stato comune."""
+    cmd = ["git", "-c", "gc.auto=0", *args]
+    if args and args[0] in SHARED_GIT:
+        with repo_lock(cwd):
+            return sh(cmd, cwd, timeout)
+    return sh(cmd, cwd, timeout)
+
+
 def git(cwd: Path, *args: str, step: str, timeout: int = 300) -> str:
-    code, out = sh(["git", *args], cwd, timeout)
+    code, out = git_sh(list(args), cwd, timeout)
     if code != 0:
         raise StepError(step, f"git {' '.join(args)}: {tail(out, 10)}")
     return out.strip()
@@ -609,13 +660,13 @@ def collect_diff(path: Path, base: str, copied: list[str], step: str) -> str:
 
 
 def worktree_state(path: Path) -> str:
-    return "\n".join(sh(["git", *args], path, 60)[1] for args in (["status", "--porcelain"], ["diff"]))
+    return "\n".join(git_sh(args, path, 60)[1] for args in (["status", "--porcelain"], ["diff"]))
 
 
 def discard_unstaged(path: Path, copied: list[str]) -> None:
     """Annulla quello che il revisore ha cambiato: il lavoro dell'agente è già nell'index."""
-    sh(["git", "checkout", "--", "."], path, 60)
-    sh(["git", "clean", "-fdq", *(f"--exclude={name}" for name in copied)], path, 60)
+    git_sh(["checkout", "--", "."], path, 60)
+    git_sh(["clean", "-fdq", *(f"--exclude={name}" for name in copied)], path, 60)
 
 
 def review_section(review: dict) -> list[str]:
@@ -683,9 +734,9 @@ def repair_comment(job: dict, tests: str, test_output: str, notes: list[str], re
 
 def remove_worktree(repo: Path, wt: Path) -> None:
     """git rifiuta di rimuovere worktree con submodule: in quel caso si cancella la cartella e si fa prune."""
-    if sh(["git", "worktree", "remove", "--force", str(wt)], repo, 120)[0] != 0:
+    if git_sh(["worktree", "remove", "--force", str(wt)], repo, 120)[0] != 0:
         shutil.rmtree(wt, ignore_errors=True)
-        sh(["git", "worktree", "prune"], repo, 60)
+        git_sh(["worktree", "prune"], repo, 60)
 
 
 def default_base(repo: Path, step: str) -> str:
@@ -795,7 +846,7 @@ def execute(job: dict, api: Api, run_agent=sh_stream, gh=sh, usage=None) -> None
         api.update(run_id, log=feed.take(), **fields)
 
     def stop_requested() -> bool:
-        return api.heartbeat(run_id)
+        return SHUTDOWN.is_set() or api.heartbeat(run_id)
 
     def checkpoint() -> None:
         if stop_requested():
@@ -1111,12 +1162,16 @@ def execute(job: dict, api: Api, run_agent=sh_stream, gh=sh, usage=None) -> None
         log.info("run %s: PR %s", run_id, " ".join([*sub_prs, pr_url]))
         remove_worktree(repo, wt)
     except Cancelled:
+        if SHUTDOWN.is_set():  # arresto del runner, non "ferma N": fallito, worktree lasciato per riprendere
+            log.warning("run %s interrotto dall'arresto del runner in %s", run_id, step)
+            finish(status="failed", step=step, error=tr("runner.err.shutdown"), quota=quota)
+            return
         log.info("run %s fermato da Telegram in %s", run_id, step)
         finish(status="cancelled", step=step)
         if wt.exists():  # fermato apposta: niente da guardare, il branch non è mai stato pushato
             remove_worktree(repo, wt)
             if not repair:
-                sh(["git", "branch", "-D", branch], repo, 60)
+                git_sh(["branch", "-D", branch], repo, 60)
     except StepError as e:
         log.error("run %s fallito in %s: %s", run_id, e.step, e)
         finish(status="failed", step=e.step, error=str(e), rate_limited=e.rate_limited,
@@ -1167,7 +1222,7 @@ def execute_plan(job: dict, api: Api, run_agent=sh_stream, usage=None) -> None:
     step = "worktree"
 
     def stop_requested() -> bool:
-        return api.heartbeat(run_id)
+        return SHUTDOWN.is_set() or api.heartbeat(run_id)
 
     def finish(**fields) -> None:
         api.update(run_id, log=feed.take(), **fields)
@@ -1231,6 +1286,10 @@ def execute_plan(job: dict, api: Api, run_agent=sh_stream, usage=None) -> None:
         log.info("run %s: piano pronto (%d caratteri)", run_id, len(plan))
         remove_worktree(repo, wt)
     except Cancelled:
+        if SHUTDOWN.is_set():  # arresto del runner, non "ferma N"
+            log.warning("run %s interrotto dall'arresto del runner in %s", run_id, step)
+            finish(status="failed", step=step, error=tr("runner.err.shutdown"), quota=quota)
+            return
         log.info("run %s fermato da Telegram in %s", run_id, step)
         finish(status="cancelled", step=step)
         if wt.exists():
@@ -1299,36 +1358,97 @@ def execute_realign(job: dict, api: Api) -> None:
         api.update(run_id, status="failed", step=step, error=tr("runner.err.runner", error=e))
 
 
+def run_job(job: dict, api: Api) -> None:
+    log.info("run %s: %s con %s", job["run_id"], job["task"]["external_id"], job["executor"]["name"])
+    {"realign": execute_realign, "plan": execute_plan}.get(job.get("kind"), execute)(job, api)
+
+
+class Pool:
+    """I run in esecuzione, uno per thread. Un run esce da `active` solo quando il suo esito finale è stato
+    consegnato o scritto in PENDING; elenco dei run attivi, flush di PENDING e claim stanno sotto lo stesso lock,
+    così il server non vede mai come orfano un run finito il cui esito aspetta in PENDING."""
+
+    def __init__(self, api: Api, run=run_job):
+        self.api, self.run = api, run
+        self.active: dict[int, threading.Thread] = {}
+        self.lock = threading.Lock()
+        self.wake = threading.Event()  # un posto si è liberato: chiedi subito altro lavoro
+
+    def free(self) -> bool:
+        with self.lock:
+            return len(self.active) < self.api.max_parallel
+
+    def claim(self) -> dict | None:
+        """Un run nuovo, se c'è posto e non restano esiti in sospeso."""
+        with self.lock:
+            if len(self.active) >= self.api.max_parallel or not self.api.flush_pending():
+                return None
+            job = self.api.claim(list(self.active))
+            if job:
+                thread = threading.Thread(target=self._work, args=(job,), name=f"run-{job['run_id']}", daemon=True)
+                self.active[job["run_id"]] = thread
+                thread.start()
+            return job
+
+    def _work(self, job: dict) -> None:
+        try:
+            self.run(job, self.api)
+        except Exception:  # noqa: BLE001  execute gestisce già i suoi errori: questo è l'ultimo argine
+            log.exception("run %s: errore non gestito nel thread", job["run_id"])
+        finally:
+            with self.lock:
+                self.active.pop(job["run_id"], None)
+            self.wake.set()
+
+    def join(self, timeout: float) -> list[int]:
+        """Aspetta i run in corso fino a `timeout` secondi; restituisce quelli ancora vivi."""
+        deadline = time.monotonic() + timeout
+        with self.lock:
+            threads = list(self.active.items())
+        for _, thread in threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        return [run_id for run_id, thread in threads if thread.is_alive()]
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Runner Jarvis")
-    parser.add_argument("--once", action="store_true", help="prende al massimo un run ed esce")
+    parser.add_argument("--once", action="store_true", help="prende al massimo un run, aspetta che finisca ed esce")
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(threadName)s] %(message)s")
     env = load_env()
     login_env()
     api = Api(env["JARVIS_URL"], env["JARVIS_RUNNER_TOKEN"])
     tunnel = Tunnel(env["JARVIS_SSH_HOST"], api, env["JARVIS_SSH_LOCAL_PORT"], env["JARVIS_SSH_REMOTE_PORT"])
     api.reconnect = tunnel.ensure
-    signal.signal(signal.SIGTERM, lambda *_: (tunnel.close(), sys.exit(0)))
+    pool = Pool(api)
+
+    def on_term(*_):
+        SHUTDOWN.set()
+        pool.wake.set()
+
+    signal.signal(signal.SIGTERM, on_term)
     log.info("runner avviato, jarvis su %s (%s)", env["JARVIS_URL"],
              f"tunnel ssh {env['JARVIS_SSH_HOST']}" if env["JARVIS_SSH_HOST"] else "connessione diretta")
     try:
-        while True:
+        while not SHUTDOWN.is_set():
             job = None
-            if tunnel.ensure():
+            if pool.free() and tunnel.ensure():
                 try:
-                    if api.flush_pending():  # un claim con un esito non consegnato farebbe fallire il run come orfano
-                        job = api.claim()
+                    job = pool.claim()
                 except (urllib.error.URLError, OSError) as e:
                     log.error("claim: %s", e)
-            if job:
-                log.info("run %s: %s con %s", job["run_id"], job["task"]["external_id"], job["executor"]["name"])
-                {"realign": execute_realign, "plan": execute_plan}.get(job.get("kind"), execute)(job, api)
             if args.once:
+                pool.join(float("inf"))
                 break
-            if not job:
-                time.sleep(POLL_SECONDS)
+            if job:
+                continue  # c'era lavoro: forse ce n'è altro per un altro posto libero
+            pool.wake.wait(POLL_SECONDS)
+            pool.wake.clear()
     finally:
+        if SHUTDOWN.is_set():
+            left = pool.join(SHUTDOWN_JOIN_SECONDS)
+            if left:
+                log.error("arresto: run ancora in corso %s, li segnerà il server al prossimo avvio", left)
         tunnel.close()
 
 

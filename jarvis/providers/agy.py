@@ -71,7 +71,7 @@ class AgyProvider(Provider):
     name = "agy"
     binary = "agy"
     # plan_structured: --json-schema nativo, verificato con la CLI vera il 20/10/2026 (agy 1.4.3, structured_output).
-    capabilities = frozenset({"execute", "plan_structured", "review", "quota"})
+    capabilities = frozenset({"execute", "plan_structured", "review", "quota", "concurrent"})
 
     def build_exec_cmd(self, executor: dict, prompt: str, *, commands: Sequence[str | None],
                        skip_permissions: bool, timeout_minutes: int) -> list[str]:

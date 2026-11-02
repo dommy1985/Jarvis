@@ -582,3 +582,89 @@ def test_quota_events_accept_any_cli_after_migration(server):
     app, _, _ = server
     app.conn.execute("INSERT INTO quota_events (cli, kind, observed_at) VALUES ('copilot', 'rate_limited', 'x')")
     assert app.conn.execute("SELECT cli FROM quota_events").fetchone()[0] == "copilot"
+
+
+# --- run in parallelo ---
+
+def _running_run(**kw):
+    return {"id": 1, "kind": "agent", "project": "novainfo", "cli": "claude", "parent_run_id": None,
+            "rate_limited": 0} | kw
+
+
+def _queued_run(**kw):
+    return {"kind": "agent", "project": "nova-news-api", "cli": "claude", "parent_run_id": None} | kw
+
+
+def test_can_start_rules(tmp_path):
+    cfg = config.load(CONFIG)
+    cfg.raw["runner"]["max_parallel"] = 2
+    assert runs.can_start(cfg, _queued_run(), []) is None
+    assert runs.can_start(cfg, _queued_run(), [_running_run()]) is None
+    assert runs.can_start(cfg, _queued_run(), [_running_run(), _running_run(id=2)]) == "full"
+    assert runs.can_start(cfg, _queued_run(project="novainfo"), [_running_run()]) == "same_project"
+    # app e submodule lavorano sugli stessi repo, in entrambe le direzioni
+    assert runs.can_start(cfg, _queued_run(project="my-lib"), [_running_run(project="my-app")]) == "same_project"
+    assert runs.can_start(cfg, _queued_run(project="my-app"), [_running_run(project="my-lib")]) == "same_project"
+    assert runs.can_start(cfg, _queued_run(kind="realign", parent_run_id=1, cli=None),
+                          [_running_run(project="orbit-be")]) == "same_parent"
+    assert runs.can_start(cfg, _queued_run(), [_running_run(rate_limited=1)]) == "quota"
+    assert runs.can_start(cfg, _queued_run(cli="agy"), [_running_run(rate_limited=1)]) is None
+    cfg.projects["novainfo"]["parallel_safe"] = False
+    assert runs.can_start(cfg, _queued_run(), [_running_run()]) == "parallel_safe"
+    assert runs.can_start(cfg, _queued_run(project="novainfo"), [_running_run(project="nova-news-api")]) \
+        == "parallel_safe"
+
+
+def test_can_start_cli_without_concurrent_sessions(tmp_path, monkeypatch):
+    cfg = config.load(CONFIG)
+    cfg.raw["runner"]["max_parallel"] = 2
+    from jarvis import providers
+    monkeypatch.setattr(providers.get("agy"), "capabilities", frozenset({"execute"}))
+    assert runs.can_start(cfg, _queued_run(cli="agy"), [_running_run(cli="agy")]) == "cli"
+    assert runs.can_start(cfg, _queued_run(cli="claude"), [_running_run(cli="agy")]) is None
+
+
+def test_two_runs_in_parallel_only_on_different_projects(server):
+    app, notifier, url = server
+    app.cfg.raw["runner"]["max_parallel"] = 2
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1 3", 2)  # stesso progetto (novainfo)
+    first = post(f"{url}/runner/claim", {"active": []}, token="rt")
+    assert first["run"]["run_id"] == 1 and first["max_parallel"] == 2
+    second = post(f"{url}/runner/claim", {"active": [1]}, token="rt")
+    assert second["run"] is None and second["max_parallel"] == 2
+    assert app.conn.execute("SELECT status FROM runs WHERE id = 1").fetchone()["status"] == "running"
+    assert "stesso progetto già in esecuzione" in say(url, "coda", 3)
+
+    # il secondo task passa a un altro progetto: parte accanto al primo
+    app.conn.execute("UPDATE tasks SET project = 'nova-news-api' WHERE id = (SELECT task_id FROM runs WHERE id = 2)")
+    second = post(f"{url}/runner/claim", {"active": [1]}, token="rt")
+    assert second["run"]["run_id"] == 2
+    assert post(f"{url}/runner/claim", {"active": [1, 2]}, token="rt")["run"] is None  # posti finiti
+    statuses = [r["status"] for r in app.conn.execute("SELECT status FROM runs ORDER BY id")]
+    assert statuses == ["running", "running"]
+
+    # senza numero, con due run in corso, Jarvis chiede quale
+    reply = say(url, "ferma", 4)
+    assert "ci sono 2 run attivi, quale?" in reply and "#1" in reply and "#2" in reply
+    assert "ci sono 2 run attivi" in say(url, "log", 5)
+    assert "ci sono 2 run attivi" in say(url, "segui", 6)
+    assert "Run #2" in say(url, "log 2", 7)
+    assert app.conn.execute("SELECT SUM(cancel_requested) AS n FROM runs").fetchone()["n"] == 0
+
+    # il runner si riavvia e ha perso il run 2: solo quello è orfano
+    post(f"{url}/runner/claim", {"active": [1]}, token="rt")
+    statuses = {r["id"]: r["status"] for r in app.conn.execute("SELECT id, status FROM runs")}
+    assert statuses == {1: "running", 2: "failed"}
+
+
+def test_old_runner_without_active_keeps_one_run_at_a_time(server):
+    app, notifier, url = server
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1", 2)
+    claimed = post(f"{url}/runner/claim", {}, token="rt")
+    assert claimed["run"]["run_id"] == 1 and claimed["max_parallel"] == 1
+    post(f"{url}/runner/claim", {}, token="rt")  # un runner vecchio chiede lavoro solo quando è libero
+    assert app.conn.execute("SELECT status FROM runs WHERE id = 1").fetchone()["status"] == "failed"

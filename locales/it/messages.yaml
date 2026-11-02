@@ -247,6 +247,13 @@ runs.never_seen: mai visto
 runs.offline: '⚠️ Runner offline ({when}): Mac spento o runner fermo. I run partono quando torna.'
 runs.stale_error: nessuna notizia dal runner da {hours:g} ore
 runs.orphan_error: il runner si è riavviato o interrotto durante il run
+runs.wait.full: tutti i posti del runner occupati
+runs.wait.parallel_safe: il progetto non gira mai insieme ad altri
+runs.wait.same_project: stesso progetto già in esecuzione
+runs.wait.same_parent: si sta già lavorando sulla stessa PR
+runs.wait.cli: "{cli} non regge due sessioni insieme"
+runs.wait.quota: "{cli} ha appena preso un rate limit"
+runs.err.which_run: "ci sono {n} run attivi, quale? {runs}"
 notif.who_realign: riallineamento del submodule
 notif.who_repair: '{executor} (riparazione del run #{parent})'
 notif.tests_passed: test ok
@@ -427,6 +434,7 @@ runner.err.nothing_in_sub: niente da committare in {path} oltre ai file locali
 runner.err.nothing: niente da committare oltre ai file locali
 runner.err.no_plan: l'agente non ha scritto nessun piano
 runner.err.runner: 'errore del runner: {error}'
+runner.err.shutdown: il runner è stato arrestato o riavviato durante il run
 runner.note.local_missing: 'file locale non trovato, non copiato: `{label}{name}`'
 runner.note.transient: 'primo tentativo dell''agente fallito per un errore temporaneo: {error}'
 runner.note.reviewer_edited: 'il revisore ha modificato file in `{name}`: modifiche annullate'
