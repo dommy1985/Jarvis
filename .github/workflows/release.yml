@@ -3,7 +3,7 @@ on:
   push:
     tags: ["v*"]
 permissions:
-  contents: read
+  contents: write   # gh release create
   packages: write
 jobs:
   image:
@@ -32,3 +32,17 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - name: GitHub release from CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          v="${TAG#v}"
+          awk -v v="$v" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ || /^\[[^]]+\]: http/ {f=0} f' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then echo "No CHANGELOG section for $v" > notes.md; fi
+          printf '\nDocker image: `ghcr.io/%s:%s` (linux/amd64 + linux/arm64).\n' "${GITHUB_REPOSITORY,,}" "$v" >> notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md
+          fi

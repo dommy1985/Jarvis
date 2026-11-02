@@ -133,3 +133,7 @@ User-facing strings live in `locales/<code>/` (messages, command vocabulary, pro
 - A Codex adapter (this guide)
 - A mode without n8n (ingest and the briefing schedule inside the server)
 - More locales
+
+## Releases
+
+Add a line under `## [Unreleased]` in `CHANGELOG.md` with every user-visible change. To release, rename that section to `## [X.Y.Z] - YYYY-MM-DD`, add a new empty `[Unreleased]` above it and the compare link at the bottom, merge, then push the tag `vX.Y.Z`. The release workflow builds the Docker image and creates the GitHub release with that section as notes.
