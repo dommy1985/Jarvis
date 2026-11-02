@@ -56,7 +56,7 @@ def claude_reset(text: str, now: datetime | None = None) -> str | None:
 class ClaudeProvider(Provider):
     name = "claude"
     binary = "claude"
-    capabilities = frozenset({"execute", "plan_structured", "review", "concurrent"})  # niente "quota": Claude non espone le quote
+    capabilities = frozenset({"execute", "plan_structured", "review", "concurrent", "inbox_hook"})  # niente "quota": Claude non espone le quote
     uses_task_suffix = True
 
     def build_exec_cmd(self, executor: dict, prompt: str, *, commands: Sequence[str | None],
@@ -68,6 +68,11 @@ class ClaudeProvider(Provider):
             "--disallowedTools", "Bash(git push:*),Bash(gh:*)",
             "--setting-sources", "project,local",
         ]
+
+    def inbox_hook_args(self, command: str) -> list[str]:
+        # hook PostToolUse da --settings (caricato a parte da --setting-sources): output JSON con additionalContext
+        return ["--settings", json.dumps({"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [
+            {"type": "command", "command": command, "timeout": 10}]}]}})]
 
     def build_plan_cmd(self, executor: dict, prompt: str, *, timeout_minutes: int) -> list[str]:
         return ["claude", "-p", prompt, "--model", executor["model"], "--output-format", "stream-json", "--verbose",

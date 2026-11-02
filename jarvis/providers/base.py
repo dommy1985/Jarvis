@@ -9,7 +9,8 @@ from collections.abc import Callable, Sequence
 
 from jarvis.i18n import t
 
-CAPABILITIES = ("execute", "plan_structured", "review", "quota", "concurrent")  # concurrent: più sessioni insieme
+CAPABILITIES = ("execute", "plan_structured", "review", "quota", "concurrent", "inbox_hook")
+# concurrent: più sessioni insieme; inbox_hook: un comando dopo ogni strumento può aggiungere contesto (mailbox)
 QUOTA = re.compile(r"usage limit|rate.?limit|quota|RESOURCE_EXHAUSTED|\b429\b|limit reached|hit your .{0,20}limit",
                    re.IGNORECASE)
 
@@ -86,6 +87,11 @@ class Provider(ABC):
     @abstractmethod
     def allowed_commands(self, commands: Sequence[str | None], submodule_paths: Sequence[str]) -> list[str]:
         """Comandi di shell che l'agente può lanciare (elenco mostrato nel prompt del task)."""
+
+    def inbox_hook_args(self, command: str) -> list[str]:
+        """Capability "inbox_hook": argomenti da aggiungere al comando dell'esecutore perché `command` giri dopo
+        ogni strumento e il suo output entri nel contesto dell'agente. Senza la capability: niente."""
+        return []
 
     def event_lines(self, event: dict, root: str | None = None) -> list[str]:
         """Righe di log dal vivo per un evento stream-json dell'agente."""
