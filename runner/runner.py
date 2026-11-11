@@ -192,8 +192,10 @@ def agent_env(hooks: Path = HOOKS, mailbox: dict | None = None) -> dict:
         os.replace(tmp, hook)
     gh_config = hooks.parent / "gh-empty"
     gh_config.mkdir(parents=True, exist_ok=True)
+    # Mai JARVIS_*: token del runner, URL del server e id restano al runner (nel container VPS arrivano dall'ambiente).
     env = {k: v for k, v in os.environ.items()
-           if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK")}
+           if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK")
+           and not k.startswith("JARVIS_")}
     env.update({
         "GIT_CONFIG_COUNT": "3",
         "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": str(hooks),
@@ -214,9 +216,20 @@ def agent_env(hooks: Path = HOOKS, mailbox: dict | None = None) -> dict:
 
 # --- API jarvis ---
 
+def runner_id_from_env(env: dict) -> str | None:
+    """JARVIS_RUNNER_ID: mac|vps. Vuoto = runner storico (il server lo tratta come mac). Un secondo runner (VPS)
+    deve impostarlo: senza, il server lo scambierebbe per il Mac."""
+    value = (env.get("JARVIS_RUNNER_ID") or "").strip()
+    if value and value not in ("mac", "vps"):
+        raise SystemExit(f"JARVIS_RUNNER_ID non valido: {value!r} (mac o vps)")
+    return value or None
+
+
 class Api:
-    def __init__(self, url: str, token: str, pending: Path = PENDING, retry_seconds: float = 10):
+    def __init__(self, url: str, token: str, pending: Path = PENDING, retry_seconds: float = 10,
+                 runner_id: str | None = None):
         self.url, self.token = url.rstrip("/"), token
+        self.runner_id = runner_id  # mac|vps; None = server vecchio / runner storico (il server assume mac)
         self.pending, self.retry_seconds = pending, retry_seconds
         self.reconnect = None  # riapre il tunnel SSH prima di un nuovo tentativo
         self.max_parallel = 1  # dall'ultima risposta al claim; un server vecchio non lo manda: un run alla volta
@@ -238,7 +251,10 @@ class Api:
 
     def claim(self, active: list[int] | None = None) -> dict | None:
         """Chiede un run, dicendo quali sta ancora eseguendo (gli altri 'running' sul server sono orfani)."""
-        data = self._post("/runner/claim", {"active": sorted(active or [])})
+        body = {"active": sorted(active or [])}
+        if self.runner_id:
+            body["runner_id"] = self.runner_id
+        data = self._post("/runner/claim", body)
         try:
             self.max_parallel = max(1, int(data.get("max_parallel") or 1))
         except (TypeError, ValueError):
@@ -1484,7 +1500,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(threadName)s] %(message)s")
     env = load_env()
     login_env()
-    api = Api(env["JARVIS_URL"], env["JARVIS_RUNNER_TOKEN"])
+    api = Api(env["JARVIS_URL"], env["JARVIS_RUNNER_TOKEN"], runner_id=runner_id_from_env(env))
     tunnel = Tunnel(env["JARVIS_SSH_HOST"], api, env["JARVIS_SSH_LOCAL_PORT"], env["JARVIS_SSH_REMOTE_PORT"])
     api.reconnect = tunnel.ensure
     pool = Pool(api)

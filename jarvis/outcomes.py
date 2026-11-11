@@ -172,9 +172,9 @@ def refresh(conn: sqlite3.Connection, gh: GitHub) -> list[str]:
                                (run["id"],)).fetchone()
         if merged and not already:
             cur = conn.execute(
-                """INSERT INTO runs (task_id, executor, model, status, queued_at, kind, project, parent_run_id)
-                   VALUES (?, 'runner', '-', 'queued', ?, 'realign', ?, ?)""",
-                (run["task_id"], _now(), run["project"], run["id"]),
+                """INSERT INTO runs (task_id, executor, model, status, queued_at, kind, project, parent_run_id, target)
+                   VALUES (?, 'runner', '-', 'queued', ?, 'realign', ?, ?, ?)""",
+                (run["task_id"], _now(), run["project"], run["id"], run["target"]),
             )
             ref = html.escape(short_ref(run["external_id"]), quote=False)
             messages.append(t("outcomes.submodule_merged", pr=html.escape(merged[0], quote=False), ref=ref,

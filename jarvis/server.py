@@ -117,11 +117,17 @@ class Handler(BaseHTTPRequestHandler):
     def _claim(self, payload: dict):
         cfg = self.app.cfg
         with self.app.lock:
-            checks.record(self.app.conn, "runner_seen", utc_now())
+            runner_id = payload.get("runner_id") if payload.get("runner_id") in ("mac", "vps") else runs.PRIMARY_RUNNER
+            if payload.get("runner_id") not in (None, "mac", "vps"):
+                log.warning("runner_id sconosciuto %r: trattato come %s", payload.get("runner_id"), runner_id)
+            now = utc_now()
+            checks.record(self.app.conn, f"runner_seen:{runner_id}", now)
+            if runner_id == runs.PRIMARY_RUNNER:
+                checks.record(self.app.conn, "runner_seen", now)  # chiave storica: status e avviso "offline"
             active = payload.get("active") if isinstance(payload.get("active"), list) else []
-            stale = (runs.expire_orphaned(self.app.conn, [i for i in active if isinstance(i, int)])
+            stale = (runs.expire_orphaned(self.app.conn, [i for i in active if isinstance(i, int)], runner_id)
                      + runs.expire_stale(self.app.conn, cfg.runner["stale_hours"]))
-            job = runs.claim(self.app.conn, cfg)
+            job = runs.claim(self.app.conn, cfg, runner_id)
         for run_id in stale:
             self.app.notify_run(run_id)
         if job:
@@ -281,6 +287,7 @@ class Handler(BaseHTTPRequestHandler):
         text_no_base, base = runs.split_base(text_no_note)
         text_no_base, plan = runs.split_plan(text_no_base)
         text_no_base, _ = runs.split_together(text_no_base)
+        text_no_base, target = runs.split_target(text_no_base)
         word_no_base = " ".join(text_no_base.strip().lower().split()).rstrip(".!")
         if go is None and (m := runs.GO_REF.fullmatch(word_no_base)):
             try:
@@ -294,6 +301,8 @@ class Handler(BaseHTTPRequestHandler):
                     go["base"] = base
                 if plan:
                     go["plan"] = True
+                if target:
+                    go["target"] = target
                 if note:
                     go["note"] = note
         if go is not None:
@@ -411,7 +420,7 @@ class Handler(BaseHTTPRequestHandler):
                         positions = [position]
                     done, to_assign = runs.queue(self.app.conn, self.app.cfg, current["id"], positions, executor, go.get("base"),
                                                 plan=go.get("plan", False), note=go.get("note"),
-                                                together=go.get("together", False))
+                                                together=go.get("together", False), target=go.get("target"))
                     self.app.conn.execute("COMMIT")
                 except (runs.RunError, briefing.ReplyError) as e:
                     self.app.conn.execute("ROLLBACK")

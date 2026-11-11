@@ -1211,3 +1211,30 @@ def test_stacked_pr_body_points_to_the_pr_below(tmp_path):
     body = runner.pr_body(j, "fatto", "passed", "", [], repo="alex-dev/novainfo")
     assert "#5" in body and "https://github.com/x/y/pull/12" in body
     assert "pull/12" not in runner.pr_body(j, "fatto", "passed", "", [], repo="alex-dev/my-lib")
+
+
+def test_api_claim_sends_runner_id(monkeypatch):
+    sent = []
+    api = runner.Api("http://127.0.0.1:9", "t", runner_id="vps")
+    monkeypatch.setattr(api, "_post", lambda path, body: sent.append((path, body)) or {"run": None})
+    api.claim([3])
+    assert sent == [("/runner/claim", {"active": [3], "runner_id": "vps"})]
+
+
+def test_runner_id_from_env():
+    assert runner.runner_id_from_env({}) is None
+    assert runner.runner_id_from_env({"JARVIS_RUNNER_ID": ""}) is None
+    assert runner.runner_id_from_env({"JARVIS_RUNNER_ID": "vps"}) == "vps"
+    with pytest.raises(SystemExit, match="JARVIS_RUNNER_ID"):
+        runner.runner_id_from_env({"JARVIS_RUNNER_ID": "cloud"})
+
+
+def test_agent_env_never_carries_runner_credentials(tmp_path, monkeypatch):
+    monkeypatch.setenv("JARVIS_RUNNER_TOKEN", "secret-token")
+    monkeypatch.setenv("JARVIS_URL", "http://jarvis:8080")
+    monkeypatch.setenv("JARVIS_RUNNER_ID", "vps")
+    env = runner.agent_env(tmp_path / "hooks")
+    assert not [k for k in env if k.startswith("JARVIS_")]  # niente token, URL del server, id
+    env = runner.agent_env(tmp_path / "hooks", {"url": "http://127.0.0.1:1", "token": "m", "run_id": 3})
+    assert {k for k in env if k.startswith("JARVIS_")} == {"JARVIS_MSG_URL", "JARVIS_MSG_TOKEN", "JARVIS_RUN_ID"}
+    assert "secret-token" not in env.values()
