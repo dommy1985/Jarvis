@@ -415,6 +415,16 @@ def _kill(proc: subprocess.Popen) -> None:
             continue
 
 
+def project_env() -> dict:
+    """Ambiente di setup e test del progetto: eseguono codice dell'agente e delle dipendenze (postinstall, jest).
+    Mai le credenziali del runner (JARVIS_*, token Claude). Sul runner VPS, dove GH_TOKEN e il credential helper git
+    sono iniettati apposta, nemmeno quelli: solo il runner pusha. Sul Mac GH_TOKEN resta (pacchetti privati)."""
+    drop = ("JARVIS_", "CLAUDE_CODE_OAUTH_TOKEN")
+    if os.environ.get("JARVIS_RUNNER_ID") == "vps":
+        drop += ("GH_TOKEN", "GITHUB_TOKEN", "GIT_CONFIG_")
+    return {k: v for k, v in os.environ.items() if not k.startswith(drop)}
+
+
 def sh(cmd: list[str] | str, cwd: Path, timeout: int, env: dict | None = None, check=None) -> tuple[int, str]:
     """Esegue un comando (stringa: shell di login, come nel terminale). Restituisce codice e output.
 
@@ -920,7 +930,7 @@ def execute(job: dict, api: Api, run_agent=sh_stream, gh=sh, usage=None) -> None
             raise Cancelled()
 
     def run_tests(command: str, cwd: Path) -> tuple[str, str]:
-        code, out = sh(command, cwd, limits["test_timeout_minutes"] * 60, check=stop_requested)
+        code, out = sh(command, cwd, limits["test_timeout_minutes"] * 60, env=project_env(), check=stop_requested)
         if code == 130:
             raise Cancelled()
         return ("passed" if code == 0 else "failed"), tail(out)
@@ -1062,7 +1072,7 @@ def execute(job: dict, api: Api, run_agent=sh_stream, gh=sh, usage=None) -> None
         step = "setup"
         if project.get("setup"):
             api.update(run_id, step=step)
-            code, out = sh(project["setup"], cwd, limits["setup_timeout_minutes"] * 60, check=stop_requested)
+            code, out = sh(project["setup"], cwd, limits["setup_timeout_minutes"] * 60, env=project_env(), check=stop_requested)
             if code == 130:
                 raise Cancelled()
             if code != 0:
@@ -1315,7 +1325,7 @@ def execute_plan(job: dict, api: Api, run_agent=sh_stream, usage=None) -> None:
         if project.get("setup"):
             api.update(run_id, step=step)
             feed.line(tr("runner.feed.setup"))
-            code, out = sh(project["setup"], cwd, limits["setup_timeout_minutes"] * 60, check=stop_requested)
+            code, out = sh(project["setup"], cwd, limits["setup_timeout_minutes"] * 60, env=project_env(), check=stop_requested)
             if code == 130:
                 raise Cancelled()
             if code != 0:
@@ -1397,7 +1407,7 @@ def execute_realign(job: dict, api: Api) -> None:
         step = "setup"
         if project.get("setup"):
             api.update(run_id, step=step)
-            code, out = sh(project["setup"], wt, limits["setup_timeout_minutes"] * 60)
+            code, out = sh(project["setup"], wt, limits["setup_timeout_minutes"] * 60, env=project_env())
             if code != 0:
                 raise StepError(step, tr("runner.err.setup", command=project["setup"], code=code, tail=tail(out, 10)))
         sub = wt / path

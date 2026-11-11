@@ -1238,3 +1238,19 @@ def test_agent_env_never_carries_runner_credentials(tmp_path, monkeypatch):
     env = runner.agent_env(tmp_path / "hooks", {"url": "http://127.0.0.1:1", "token": "m", "run_id": 3})
     assert {k for k in env if k.startswith("JARVIS_")} == {"JARVIS_MSG_URL", "JARVIS_MSG_TOKEN", "JARVIS_RUN_ID"}
     assert "secret-token" not in env.values()
+
+
+def test_project_command_env_never_carries_runner_credentials(monkeypatch):
+    base = {"PATH": "/bin", "JARVIS_RUNNER_TOKEN": "t", "JARVIS_URL": "u", "CLAUDE_CODE_OAUTH_TOKEN": "o",
+            "GH_TOKEN": "g", "GITHUB_TOKEN": "g2", "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "k",
+            "GIT_CONFIG_VALUE_0": "v", "NPM_CONFIG_CACHE": "/c"}
+    for k, v in base.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("JARVIS_RUNNER_ID", raising=False)
+    mac = runner.project_env()  # Mac: i build possono usare GH_TOKEN (pacchetti privati), mai le credenziali del runner
+    assert "JARVIS_RUNNER_TOKEN" not in mac and "CLAUDE_CODE_OAUTH_TOKEN" not in mac and mac["GH_TOKEN"] == "g"
+    monkeypatch.setenv("JARVIS_RUNNER_ID", "vps")
+    vps = runner.project_env()
+    assert not [k for k in vps if k.startswith(("JARVIS_", "GIT_CONFIG"))]
+    assert not {"GH_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"} & vps.keys()
+    assert vps["PATH"] == "/bin" and vps["NPM_CONFIG_CACHE"] == "/c"  # il resto dell'ambiente resta
