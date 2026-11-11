@@ -13,7 +13,7 @@ import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from jarvis import plantext, providers
+from jarvis import checks, plantext, providers
 from jarvis.briefing import short_ref
 from jarvis.config import Config
 from jarvis.i18n import alternation, get_locale, messages, t, words
@@ -26,6 +26,8 @@ BASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 LOG_KEEP_DAYS = 7
 LOG_PER_RUN = 300
 RUNNER_OFFLINE_MINUTES = 3  # il runner chiede lavoro ogni minuto
+FAILOVER_AFTER_MINUTES = 5  # default di runner.failover_after_minutes: Mac offline da tanto, i run "auto" vanno al VPS
+PRIMARY_RUNNER = "mac"
 PATTERN_NAMES = ("GO", "GO_REF", "BASE", "NOTE", "PLAN_WORD", "TOGETHER_WORD", "APPROVE", "DISCARD", "REVISE", "LOG", "REPAIR", "STOP")
 
 
@@ -112,6 +114,17 @@ def split_together(text: str) -> tuple[str, bool]:
     return (stripped, True) if stripped != text.strip() else (text, False)
 
 
+TARGET_WORD = re.compile(r"(?:^|\s)(mac|vps)\s*$", re.IGNORECASE)  # solo come ultima parola
+
+
+def split_target(text: str) -> tuple[str, str | None]:
+    """"vai 4 vps" -> ("vai 4", "vps"): dove far girare il run (mac|vps), se l'owner lo indica."""
+    m = TARGET_WORD.search(text)
+    if m is None:
+        return text, None
+    return re.sub(r"\s{2,}", " ", text[:m.start()] + " " + text[m.end():]).strip(), m.group(1).lower()
+
+
 def valid_base(name: str) -> bool:
     """Nome di branch ammesso come base: niente opzioni git, `..` o suffissi riservati."""
     return bool(BASE_NAME.fullmatch(name)) and ".." not in name and not name.endswith(("/", ".lock"))
@@ -125,6 +138,7 @@ def parse_go(text: str) -> dict | None:
     text, base = split_base(text)
     text, plan = split_plan(text)
     text, together = split_together(text)
+    text, target = split_target(text)
     m = _rx("GO").fullmatch(" ".join(text.strip().lower().split()).rstrip(".!"))
     if m is None:
         return None
@@ -136,6 +150,8 @@ def parse_go(text: str) -> dict | None:
         go["plan"] = True
     if together:
         go["together"] = True
+    if target:
+        go["target"] = target
     if note:
         go["note"] = note
     return go
@@ -143,7 +159,7 @@ def parse_go(text: str) -> dict | None:
 
 def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: list[int],
           executor: str | None = None, base_branch: str | None = None, plan: bool = False,
-          note: str | None = None, together: bool = False) -> tuple[list[str], list[tuple[str, int, int]]]:
+          note: str | None = None, together: bool = False, target: str | None = None) -> tuple[list[str], list[tuple[str, int, int]]]:
     """Mette in coda le voci approvate (tutte se positions è vuota), con `executor` e `base_branch` se indicati.
     Con `plan` (o `plan_first` nel progetto) parte prima un run di piano: l'agente non tocca niente, il piano va
     all'owner e il lavoro parte solo con "approva N". `note` aggiunge eventuali istruzioni dell'owner.
@@ -194,10 +210,10 @@ def queue(conn: sqlite3.Connection, cfg: Config, briefing_id: int, positions: li
         planning = plan or bool(cfg.projects.get(i["project"], {}).get("plan_first"))
         conn.execute(
             """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind,
-                                 owner_note, parallel_group)
-               VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)""",
+                                 owner_note, parallel_group, target)
+               VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)""",
             (i["task_id"], i["id"], name, executors[name]["model"], now, base_branch, "plan" if planning else "agent",
-             note[:2000] if note else None, group),
+             note[:2000] if note else None, group, target),
         )
         conn.execute("UPDATE tasks SET skip_count = 0 WHERE id = ?", (i["task_id"],))  # ci si lavora: salti azzerati
         conn.execute(
@@ -272,10 +288,11 @@ def approve_plan(conn: sqlite3.Connection, run_id: int | None) -> str:
     conn.execute("UPDATE runs SET plan_state = 'approved' WHERE id = ?", (plan["id"],))
     cur = conn.execute(
         """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind,
-                             plan_of, owner_note, parallel_group, depends_on_run)
-           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'agent', ?, ?, ?, ?)""",
+                             plan_of, owner_note, parallel_group, depends_on_run, target)
+           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'agent', ?, ?, ?, ?, ?)""",
         (plan["task_id"], plan["briefing_item_id"], plan["executor"], plan["model"], _iso(_now()),
-         plan["base_branch"], plan["id"], plan["owner_note"], plan["parallel_group"], plan["depends_on_run"]),
+         plan["base_branch"], plan["id"], plan["owner_note"], plan["parallel_group"], plan["depends_on_run"],
+         plan["target"]),
     )
     return t("runs.plan_approved", plan_id=plan["id"], executor=html.escape(plan["executor"]), run_id=cur.lastrowid)
 
@@ -289,11 +306,11 @@ def revise_plan(conn: sqlite3.Connection, run_id: int | None, note: str) -> str:
     conn.execute("UPDATE runs SET plan_state = 'revised' WHERE id = ?", (plan["id"],))
     cur = conn.execute(
         """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, base_branch, kind,
-                             plan_of, plan_note, owner_note, parallel_group, depends_on_run)
-           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'plan', ?, ?, ?, ?, ?)""",
+                             plan_of, plan_note, owner_note, parallel_group, depends_on_run, target)
+           VALUES (?, ?, ?, ?, 'queued', ?, ?, 'plan', ?, ?, ?, ?, ?, ?)""",
         (plan["task_id"], plan["briefing_item_id"], plan["executor"], plan["model"], _iso(_now()),
          plan["base_branch"], plan["id"], note[:2000], plan["owner_note"], plan["parallel_group"],
-         plan["depends_on_run"]),
+         plan["depends_on_run"], plan["target"]),
     )
     return t("runs.plan_revised", run_id=cur.lastrowid, plan_id=plan["id"])
 
@@ -466,11 +483,11 @@ def repair(conn: sqlite3.Connection, cfg: Config, run_id: int, executor: str | N
                     "until": seen.get("until") or run["checked_at"] or _iso(_now())}
     cur = conn.execute(
         """INSERT INTO runs (task_id, executor, model, status, queued_at, kind, project, parent_run_id, branch,
-                             pr_url, sub_pr_urls, feedback, base_branch, depends_on_run)
-           VALUES (?, ?, ?, 'queued', ?, 'repair', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                             pr_url, sub_pr_urls, feedback, base_branch, depends_on_run, target)
+           VALUES (?, ?, ?, 'queued', ?, 'repair', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (run["task_id"], name, cfg.raw["executors"][name]["model"], _iso(_now()), run["project"], run["id"],
          run["branch"], run["pr_url"], run["sub_pr_urls"], json.dumps(feedback, ensure_ascii=False) if feedback else None,
-         base, stacked["id"] if rebase else None),
+         base, stacked["id"] if rebase else None, run["target"]),
     )
     work = t("runs.repair_work")
     if feedback:
@@ -516,13 +533,15 @@ def expire_stale(conn: sqlite3.Connection, hours: float) -> list[int]:
     return _fail_running(conn, rows, t("runs.stale_error", hours=hours))
 
 
-def expire_orphaned(conn: sqlite3.Connection, active: list[int] | None = None) -> list[int]:
+def expire_orphaned(conn: sqlite3.Connection, active: list[int] | None = None,
+                    runner_id: str = PRIMARY_RUNNER) -> list[int]:
     """Il runner chiede lavoro con l'elenco dei run che sta ancora eseguendo (`active`): un run 'running' che non è
     nell'elenco è orfano (runner riavviato o crollato), fallito subito e la voce torna approvata. Un runner vecchio
     non manda l'elenco e chiede lavoro solo quando è libero: `active` vuoto, ogni run 'running' è orfano."""
     keep = {int(i) for i in active or []}
-    rows = [r for r in conn.execute("SELECT id, briefing_item_id FROM runs WHERE status = 'running'").fetchall()
-            if r["id"] not in keep]
+    rows = [r for r in conn.execute(
+        "SELECT id, briefing_item_id FROM runs WHERE status = 'running' AND COALESCE(runner_id, ?) = ?",
+        (PRIMARY_RUNNER, runner_id)).fetchall() if r["id"] not in keep]  # solo i run di questo runner
     return _fail_running(conn, rows, t("runs.orphan_error"))
 
 
@@ -665,7 +684,26 @@ def waiting(conn: sqlite3.Connection, cfg: Config) -> dict[int, str]:
     return out
 
 
-CLAIM_SELECT = """SELECT r.id, r.executor, r.model, r.kind, r.parent_run_id, r.feedback, r.fallback_from, r.base_branch,
+def run_target(cfg: Config, row: sqlite3.Row) -> str:
+    """Dove deve girare il run: override del run, altrimenti il `target` del progetto (default mac)."""
+    return row["target"] or cfg.projects.get(row["project"], {}).get("target") or PRIMARY_RUNNER
+
+
+def _primary_offline_for(conn: sqlite3.Connection, cfg: Config) -> bool:
+    """True se il runner Mac non si fa vedere da più di runner.failover_after_minutes (mai visto = offline)."""
+    seen = checks.get(conn, f"runner_seen:{PRIMARY_RUNNER}")
+    limit = float(cfg.runner.get("failover_after_minutes") or FAILOVER_AFTER_MINUTES)
+    return not seen or datetime.fromisoformat(seen) <= _now() - timedelta(minutes=limit)
+
+
+def _eligible(conn: sqlite3.Connection, cfg: Config, row: sqlite3.Row, runner_id: str) -> bool:
+    target = run_target(cfg, row)
+    if target == "auto":
+        return runner_id == PRIMARY_RUNNER or _primary_offline_for(conn, cfg)
+    return target == runner_id
+
+
+CLAIM_SELECT = """SELECT r.id, r.target, r.executor, r.model, r.kind, r.parent_run_id, r.feedback, r.fallback_from, r.base_branch,
                   r.plan_of, r.plan_note, r.owner_note, r.parallel_group, r.depends_on_run, i.depends_on,
                   t.source, t.external_id,
                   COALESCE(r.project, t.project) AS project, t.project AS task_project,
@@ -674,20 +712,23 @@ CLAIM_SELECT = """SELECT r.id, r.executor, r.model, r.kind, r.parent_run_id, r.f
            WHERE r.status = 'queued'"""
 
 
-def claim(conn: sqlite3.Connection, cfg: Config) -> dict | None:
+def claim(conn: sqlite3.Connection, cfg: Config, runner_id: str = PRIMARY_RUNNER) -> dict | None:
     """Prende il run in coda più vecchio che può partire accanto a quelli in corso (can_start, al massimo
-    runner.max_parallel insieme) e lo passa a 'running'."""
+    runner.max_parallel insieme) e lo passa a 'running'. Solo i run destinati a `runner_id` (vedi run_target):
+    quelli "auto" vanno al VPS solo quando il Mac è offline oltre runner.failover_after_minutes."""
     running = _running(conn, cfg)
     if len(running) >= int(cfg.runner.get("max_parallel") or 1):
         return None
     row = next((r for r in conn.execute(CLAIM_SELECT + " ORDER BY r.id").fetchall()
-                if can_start(cfg, _candidate(cfg, conn, r), running) is None), None)
+                if _eligible(conn, cfg, r, runner_id)
+                and can_start(cfg, _candidate(cfg, conn, r), running) is None), None)
     if row is None:
         return None
     now = _iso(_now())
     conn.execute(
-        "UPDATE runs SET status = 'running', started_at = ?, heartbeat_at = ?, step = 'worktree' WHERE id = ?",
-        (now, now, row["id"]),
+        "UPDATE runs SET status = 'running', started_at = ?, heartbeat_at = ?, step = 'worktree', runner_id = ? "
+        "WHERE id = ?",
+        (now, now, runner_id, row["id"]),
     )
     if row["kind"] in ("agent", "repair", "plan"):
         row = _avoid_exhausted(conn, cfg, row)
@@ -926,11 +967,11 @@ def _fallback(conn: sqlite3.Connection, cfg: Config, run: dict) -> None:
         return
     conn.execute(
         """INSERT INTO runs (task_id, briefing_item_id, executor, model, status, queued_at, kind, parent_run_id,
-                             base_branch, owner_note, plan_of, parallel_group, depends_on_run)
-           VALUES (?, ?, ?, ?, 'queued', ?, 'agent', ?, ?, ?, ?, ?, ?)""",
+                             base_branch, owner_note, plan_of, parallel_group, depends_on_run, target)
+           VALUES (?, ?, ?, ?, 'queued', ?, 'agent', ?, ?, ?, ?, ?, ?, ?)""",
         (run["task_id"], run["briefing_item_id"], other, cfg.raw["executors"][other]["model"], _iso(_now()), run["id"],
          run["base_branch"], run.get("owner_note"), run.get("plan_of"), run.get("parallel_group"),
-         run.get("depends_on_run")),
+         run.get("depends_on_run"), run.get("target")),
     )
     conn.execute("UPDATE briefing_items SET status = 'queued', final_executor = ? WHERE id = ?",
                  (other, run["briefing_item_id"]))

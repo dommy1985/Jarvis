@@ -887,3 +887,136 @@ def test_mailbox_limits(server, monkeypatch):
     assert "limite di 2 messaggi" in post(f"{url}/runner/message", {"from_run": 1, "to_run": 2, "body": "x"},
                                            token="rt")["error"]
     assert max(len(m["body"]) for m in post(f"{url}/runner/inbox", {"run_id": 2}, token="rt")["messages"]) == 2000
+
+
+# --- target mac/vps con failover (#32) ---
+
+def _queue_one(server):
+    app, notifier, url = server
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1", 2)
+    return app
+
+
+def _seen(app, runner_id, minutes_ago):
+    from datetime import datetime, timedelta, timezone
+    from jarvis import checks
+    checks.record(app.conn, f"runner_seen:{runner_id}",
+                  (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat())
+
+
+def test_default_target_is_mac_so_vps_runner_does_not_claim(server):
+    app = _queue_one(server)
+    assert runs.claim(app.conn, app.cfg, runner_id="vps") is None
+    assert runs.claim(app.conn, app.cfg, runner_id="mac")["run_id"] == 1
+
+
+def test_project_target_vps_is_claimed_only_by_vps(server):
+    app = _queue_one(server)
+    app.cfg.projects["novainfo"]["target"] = "vps"
+    assert runs.claim(app.conn, app.cfg, runner_id="mac") is None
+    assert runs.claim(app.conn, app.cfg, runner_id="vps")["run_id"] == 1
+
+
+def test_auto_target_goes_to_vps_only_when_mac_is_offline_past_failover(server):
+    app = _queue_one(server)
+    app.cfg.projects["novainfo"]["target"] = "auto"
+    app.cfg.runner["failover_after_minutes"] = 5
+    _seen(app, "mac", 4)  # offline per la soglia di presenza (3), ma non ancora per il failover
+    assert runs.claim(app.conn, app.cfg, runner_id="vps") is None
+    _seen(app, "mac", 6)
+    assert runs.claim(app.conn, app.cfg, runner_id="vps")["run_id"] == 1
+
+
+def test_run_override_beats_project_target(server):
+    app = _queue_one(server)
+    app.cfg.projects["novainfo"]["target"] = "mac"
+    app.conn.execute("UPDATE runs SET target = 'vps' WHERE id = 1")
+    assert runs.claim(app.conn, app.cfg, runner_id="mac") is None
+    assert runs.claim(app.conn, app.cfg, runner_id="vps")["run_id"] == 1
+
+
+def test_runner_claim_route_passes_runner_id_and_records_presence(server):
+    app, _, url = server
+    _queue_one(server)
+    app.cfg.projects["novainfo"]["target"] = "vps"
+    assert post(f"{url}/runner/claim", {"runner_id": "mac"}, token="rt")["run"] is None
+    job = post(f"{url}/runner/claim", {"runner_id": "vps"}, token="rt")["run"]
+    assert job["run_id"] == 1
+    assert app.conn.execute("SELECT runner_id FROM runs WHERE id = 1").fetchone()[0] == "vps"
+    from jarvis import checks
+    assert checks.get(app.conn, "runner_seen:mac") and checks.get(app.conn, "runner_seen:vps")
+
+
+def test_a_runner_does_not_orphan_the_other_runners_runs(server):
+    app = _queue_one(server)
+    app.cfg.projects["novainfo"]["target"] = "vps"
+    assert runs.claim(app.conn, app.cfg, runner_id="vps")["run_id"] == 1
+    assert runs.expire_orphaned(app.conn, [], "mac") == []  # il Mac non ha niente in corso: il run è del VPS
+    assert runs.expire_orphaned(app.conn, [], "vps") == [1]
+
+
+def test_parse_go_target():
+    assert runs.parse_go("vai 4 vps") == {"positions": [4], "executor": None, "target": "vps"}
+    assert runs.parse_go("vai 4 agy mac") == {"positions": [4], "executor": "agy", "target": "mac"}
+    assert runs.parse_go("vai 4") == {"positions": [4], "executor": None}
+
+
+def test_go_vps_sets_run_target_and_status_names_it(server):
+    app, _, url = server
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    assert "In coda" in say(url, "vai 1 vps", 2)
+    assert app.conn.execute("SELECT target FROM runs WHERE id = 1").fetchone()[0] == "vps"
+    assert runs.claim(app.conn, app.cfg, runner_id="mac") is None
+    assert runs.claim(app.conn, app.cfg, runner_id="vps")["run_id"] == 1
+
+
+def _target(app, run_id):
+    return app.conn.execute("SELECT target FROM runs WHERE id = ?", (run_id,)).fetchone()[0]
+
+
+def test_approved_and_revised_plan_keep_the_run_target(server):
+    app, _, url = server
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1 piano vps", 2)
+    app.conn.execute("UPDATE runs SET status = 'done', plan_state = 'proposed' WHERE id = 1")
+    runs.revise_plan(app.conn, 1, "aggiungi un test")
+    assert _target(app, 2) == "vps"
+    app.conn.execute("UPDATE runs SET status = 'done', plan_state = 'proposed' WHERE id = 2")
+    runs.approve_plan(app.conn, 2)
+    assert _target(app, 3) == "vps"
+
+
+def test_quota_fallback_run_keeps_the_run_target(server):
+    app, _, url = _vai_1(server, ["claude-haiku"])
+    app.conn.execute("UPDATE runs SET target = 'vps'")  # solo il run: il progetto resta sul default (mac)
+    post(f"{url}/runner/claim", {"runner_id": "vps"}, token="rt")
+    post(f"{url}/runner/update", {"run_id": 1, "status": "failed", "step": "agent", "error": "quota",
+                                  "rate_limited": True}, token="rt")
+    assert _target(app, 2) == "vps"
+
+
+def test_go_by_ticket_ref_keeps_the_target(server):
+    app, _, url = server
+    ingest(app.conn, config.load(CONFIG), {"tasks": [
+        {"source": "github", "external_id": "acme/my-lib#12", "container": "acme/my-lib", "title": "x", "url": "u12",
+         "source_status": "OPEN", "labels": [], "created_by": "alex-dev"}]}, "2026-10-13T08:00:00+00:00")
+    post(f"{url}/plan", {})
+    assert "In coda" in say(url, "vai my-lib#12 sonnet vps", 1)
+    assert _target(app, 1) == "vps"
+
+
+def test_split_target_only_matches_the_trailing_word():
+    assert runs.split_target("vai 4 agy") == ("vai 4 agy", None)
+    assert runs.split_target("vai 4 vps") == ("vai 4", "vps")
+    assert runs.split_target("vai vpsx 4") == ("vai vpsx 4", None)
+    assert runs.split_target("vai vps 4") == ("vai vps 4", None)  # non in coda: non è un target
+
+
+def test_auto_target_edge_cases(server):
+    app = _queue_one(server)
+    app.cfg.projects["novainfo"]["target"] = "auto"
+    assert runs.claim(app.conn, app.cfg, runner_id="vps")["run_id"] == 1  # Mac mai visto: offline, il VPS prende

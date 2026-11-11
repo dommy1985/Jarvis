@@ -1211,3 +1211,11 @@ def test_stacked_pr_body_points_to_the_pr_below(tmp_path):
     body = runner.pr_body(j, "fatto", "passed", "", [], repo="alex-dev/novainfo")
     assert "#5" in body and "https://github.com/x/y/pull/12" in body
     assert "pull/12" not in runner.pr_body(j, "fatto", "passed", "", [], repo="alex-dev/my-lib")
+
+
+def test_api_claim_sends_runner_id(monkeypatch):
+    sent = []
+    api = runner.Api("http://127.0.0.1:9", "t", runner_id="vps")
+    monkeypatch.setattr(api, "_post", lambda path, body: sent.append((path, body)) or {"run": None})
+    api.claim([3])
+    assert sent == [("/runner/claim", {"active": [3], "runner_id": "vps"})]

@@ -219,7 +219,7 @@ def test_yes_with_more_words_confirms_pending(server):
 
 def test_migration_adds_commands_table(tmp_path):
     conn = db.connect(tmp_path / "m.db")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 16
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 17
     conn.execute("SELECT count(*) FROM commands")
     conn.execute("SELECT owner_note FROM runs")
     conn.execute("SELECT parallel_group, depends_on_run FROM runs")
