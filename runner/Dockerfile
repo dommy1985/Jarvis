@@ -19,7 +19,10 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
-RUN useradd --uid 10002 --create-home runner && mkdir -p /repos /worktrees && chown runner /repos /worktrees
+# /repos: checkout dei progetti (vps_path). ~/.jarvis: esiti non consegnati, log, worktree e hook: va su un volume
+# persistente (un riavvio non deve perdere gli esiti in sospeso). Creati qui perché il volume erediti il proprietario.
+RUN useradd --uid 10002 --create-home runner && mkdir -p /repos /home/runner/.jarvis \
+    && chown runner /repos /home/runner/.jarvis
 USER runner
 RUN curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_CODE_VERSION} && /home/runner/.local/bin/claude --version
 ENV PATH=/home/runner/.local/bin:$PATH DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1
@@ -31,6 +34,9 @@ COPY locales/ locales/
 COPY db/ db/
 
 # JARVIS_RUNNER_ID, JARVIS_URL (http://jarvis:8080), JARVIS_RUNNER_TOKEN, GH_TOKEN e CLAUDE_CODE_OAUTH_TOKEN
-# arrivano dall'ambiente (docker-compose del hub); i checkout stanno in /repos (vps_path dei progetti).
-ENV JARVIS_RUNNER_ID=vps JARVIS_HOME=/home/runner/.jarvis
+# arrivano dall'ambiente (docker-compose del hub); i checkout stanno in /repos (vps_path dei progetti), lo stato in /home/runner/.jarvis.
+# Con il container read_only si scrive solo in ~/.jarvis (volume), ~/.cache, ~/.config, ~/.local/state (tmpfs):
+# la config di Claude va nel volume, la cache npm in ~/.cache.
+ENV JARVIS_RUNNER_ID=vps JARVIS_HOME=/home/runner/.jarvis CLAUDE_CONFIG_DIR=/home/runner/.jarvis/claude \
+    NPM_CONFIG_CACHE=/home/runner/.cache/npm
 CMD ["python", "-m", "runner.runner"]
