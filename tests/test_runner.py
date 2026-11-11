@@ -1219,3 +1219,11 @@ def test_api_claim_sends_runner_id(monkeypatch):
     monkeypatch.setattr(api, "_post", lambda path, body: sent.append((path, body)) or {"run": None})
     api.claim([3])
     assert sent == [("/runner/claim", {"active": [3], "runner_id": "vps"})]
+
+
+def test_runner_id_from_env():
+    assert runner.runner_id_from_env({}) is None
+    assert runner.runner_id_from_env({"JARVIS_RUNNER_ID": ""}) is None
+    assert runner.runner_id_from_env({"JARVIS_RUNNER_ID": "vps"}) == "vps"
+    with pytest.raises(SystemExit, match="JARVIS_RUNNER_ID"):
+        runner.runner_id_from_env({"JARVIS_RUNNER_ID": "cloud"})

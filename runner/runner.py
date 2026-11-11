@@ -214,6 +214,15 @@ def agent_env(hooks: Path = HOOKS, mailbox: dict | None = None) -> dict:
 
 # --- API jarvis ---
 
+def runner_id_from_env(env: dict) -> str | None:
+    """JARVIS_RUNNER_ID: mac|vps. Vuoto = runner storico (il server lo tratta come mac). Un secondo runner (VPS)
+    deve impostarlo: senza, il server lo scambierebbe per il Mac."""
+    value = (env.get("JARVIS_RUNNER_ID") or "").strip()
+    if value and value not in ("mac", "vps"):
+        raise SystemExit(f"JARVIS_RUNNER_ID non valido: {value!r} (mac o vps)")
+    return value or None
+
+
 class Api:
     def __init__(self, url: str, token: str, pending: Path = PENDING, retry_seconds: float = 10,
                  runner_id: str | None = None):
@@ -1489,7 +1498,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(threadName)s] %(message)s")
     env = load_env()
     login_env()
-    api = Api(env["JARVIS_URL"], env["JARVIS_RUNNER_TOKEN"], runner_id=env.get("JARVIS_RUNNER_ID") or None)
+    api = Api(env["JARVIS_URL"], env["JARVIS_RUNNER_TOKEN"], runner_id=runner_id_from_env(env))
     tunnel = Tunnel(env["JARVIS_SSH_HOST"], api, env["JARVIS_SSH_LOCAL_PORT"], env["JARVIS_SSH_REMOTE_PORT"])
     api.reconnect = tunnel.ensure
     pool = Pool(api)

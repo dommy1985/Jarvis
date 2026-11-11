@@ -229,7 +229,15 @@ def load(path: str | Path) -> Config:
             raise ConfigError(t("config.err.counterpart_executor", family=family, executor=executor))
         if raw["executors"][executor].get("family") == family:
             raise ConfigError(t("config.err.counterpart_family", family=family, executor=executor))
+    for alias in ("mac", "vps"):  # parole riservate di "vai N vps|mac"
+        if alias in raw["executors"]:
+            raise ConfigError(t("config.err.reserved_executor", name=alias))
+    failover = (raw.get("runner") or {}).get("failover_after_minutes")
+    if failover is not None and (not isinstance(failover, (int, float)) or isinstance(failover, bool) or failover <= 0):
+        raise ConfigError(t("config.err.failover"))
     for name, p in raw["projects"].items():
+        if p.get("target", "mac") not in ("mac", "vps", "auto"):
+            raise ConfigError(t("config.err.target", name=name, target=p["target"]))
         for field in ("path", "sources"):
             if field not in p:
                 raise ConfigError(t("config.err.project_field", name=name, field=field))

@@ -1020,3 +1020,38 @@ def test_auto_target_edge_cases(server):
     app = _queue_one(server)
     app.cfg.projects["novainfo"]["target"] = "auto"
     assert runs.claim(app.conn, app.cfg, runner_id="vps")["run_id"] == 1  # Mac mai visto: offline, il VPS prende
+
+
+def test_target_config_is_validated(tmp_path):
+    import yaml
+    raw = yaml.safe_load(CONFIG.read_text())
+    path = tmp_path / "t.yaml"
+    name = next(iter(raw["projects"]))
+    bad_project = {**raw, "projects": {**raw["projects"], name: {**raw["projects"][name], "target": "cloud"}}}
+    bad_alias = {**raw, "executors": {**raw["executors"], "vps": {"cli": "claude", "model": "sonnet", "family": "anthropic"}}}
+    bad_failover = {**raw, "runner": {**raw.get("runner", {}), "failover_after_minutes": 0}}
+    for bad in (bad_project, bad_alias, bad_failover):
+        path.write_text(yaml.safe_dump(bad))
+        with pytest.raises(config.ConfigError):
+            config.load(path)
+    ok = {**raw, "projects": {**raw["projects"], name: {**raw["projects"][name], "target": "auto"}}}
+    path.write_text(yaml.safe_dump(ok))
+    assert config.load(path).projects[name]["target"] == "auto"
+
+
+def test_status_shows_where_a_run_goes(server):
+    app, _, url = server
+    post(f"{url}/plan", {})
+    say(url, "ok", 1)
+    say(url, "vai 1 vps", 2)
+    assert "claude-sonnet@vps" in say(url, "coda", 3)
+
+
+def test_vps_runner_gets_the_vps_path(server):
+    app = _queue_one(server)
+    project = app.cfg.projects["novainfo"]
+    project["target"], project["vps_path"] = "auto", "/srv/repos/novainfo"
+    _seen(app, "mac", 60)
+    job = runs.claim(app.conn, app.cfg, runner_id="vps")
+    assert job["project"]["path"] == "/srv/repos/novainfo"
+    assert project["path"] != "/srv/repos/novainfo"  # il Mac continua a ricevere il suo

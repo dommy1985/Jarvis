@@ -761,11 +761,11 @@ def claim(conn: sqlite3.Connection, cfg: Config, runner_id: str = PRIMARY_RUNNER
                 | {"labels": json.loads(row["labels"])},
         "project": {"name": run_project} | {
             k: project.get(k) for k in ("path", "workdir", "setup", "build", "test", "copy_files", "agent_notes")
-        },
+        } | _local_path(project, runner_id),
         "repo": _repo(project),
         "submodules": [
             {"path": path, "project": child, "repo": _repo(cfg.projects[child]),
-             "local_path": cfg.projects[child]["path"], "test": cfg.projects[child].get("test"),
+             "local_path": _local_path(cfg.projects[child], runner_id)["path"], "test": cfg.projects[child].get("test"),
              "copy_files": cfg.projects[child].get("copy_files") or []}
             for path, child in (project.get("submodules") or {}).items()
         ],
@@ -876,6 +876,11 @@ def _avoid_exhausted(conn: sqlite3.Connection, cfg: Config, row: sqlite3.Row) ->
     conn.execute("""UPDATE briefing_items SET final_executor = ?, decision_source = 'quota_fallback'
                     WHERE id = (SELECT briefing_item_id FROM runs WHERE id = ?)""", (other, row["id"]))
     return {**dict(row), "executor": other, "model": executors[other]["model"], "fallback_from": row["executor"]}
+
+
+def _local_path(project: dict, runner_id: str) -> dict:
+    """Dove sta il checkout per questo runner: `vps_path` per il VPS (se indicato), altrimenti `path` (Mac)."""
+    return {"path": (project.get("vps_path") if runner_id == "vps" else None) or project["path"]}
 
 
 def _repo(project: dict) -> str | None:
@@ -1145,7 +1150,8 @@ def status_text(conn: sqlite3.Connection, runner_seen: str | None, cfg: Config |
                       "revised": t("status.plan_revised"), "discarded": t("status.plan_discarded")}
             extra = states.get(r["plan_state"]) or (
                 t("status.plan") if not extra else t("status.plan_extra", extra=extra))
-        lines.append(f"{icon} #{r['id']} {ref} {html.escape(r['executor'])}"
+        where = r["runner_id"] or r["target"]  # dove gira (running) o dove è stato chiesto (in coda)
+        lines.append(f"{icon} #{r['id']} {ref} {html.escape(r['executor'])}" + (f"@{where}" if where else "")
                      + (f" · {html.escape(extra, quote=False)}" if extra else ""))
     if len(lines) == 1:
         lines.append(t("status.empty"))
