@@ -192,8 +192,10 @@ def agent_env(hooks: Path = HOOKS, mailbox: dict | None = None) -> dict:
         os.replace(tmp, hook)
     gh_config = hooks.parent / "gh-empty"
     gh_config.mkdir(parents=True, exist_ok=True)
+    # Mai JARVIS_*: token del runner, URL del server e id restano al runner (nel container VPS arrivano dall'ambiente).
     env = {k: v for k, v in os.environ.items()
-           if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK")}
+           if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK")
+           and not k.startswith("JARVIS_")}
     env.update({
         "GIT_CONFIG_COUNT": "3",
         "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": str(hooks),

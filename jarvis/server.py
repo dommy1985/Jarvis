@@ -118,6 +118,8 @@ class Handler(BaseHTTPRequestHandler):
         cfg = self.app.cfg
         with self.app.lock:
             runner_id = payload.get("runner_id") if payload.get("runner_id") in ("mac", "vps") else runs.PRIMARY_RUNNER
+            if payload.get("runner_id") not in (None, "mac", "vps"):
+                log.warning("runner_id sconosciuto %r: trattato come %s", payload.get("runner_id"), runner_id)
             now = utc_now()
             checks.record(self.app.conn, f"runner_seen:{runner_id}", now)
             if runner_id == runs.PRIMARY_RUNNER:

@@ -1151,6 +1151,7 @@ def status_text(conn: sqlite3.Connection, runner_seen: str | None, cfg: Config |
             extra = states.get(r["plan_state"]) or (
                 t("status.plan") if not extra else t("status.plan_extra", extra=extra))
         where = r["runner_id"] or r["target"]  # dove gira (running) o dove è stato chiesto (in coda)
+        where = where if where != PRIMARY_RUNNER else None  # chi ha solo il Mac non vede cambiare lo stato
         lines.append(f"{icon} #{r['id']} {ref} {html.escape(r['executor'])}" + (f"@{where}" if where else "")
                      + (f" · {html.escape(extra, quote=False)}" if extra else ""))
     if len(lines) == 1:
