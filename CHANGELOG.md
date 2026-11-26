@@ -6,6 +6,11 @@ Upgrade order when a release touches the server–runner contract: server first,
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-11-26
+
+### Fixed
+- **Submodule pinned to an orphaned commit** (#36, #37). When the app pointed its submodule at a commit that is no longer on any origin branch (squash merge, branch deleted), a submodule task branched from it and its PR carried the already-merged pre-squash commits. For the task's own submodule the runner now moves it to `origin/<default>` before the agent starts and notes it in the PR. Nothing changes for a pointer on a live branch or a tag, a shallow clone, or when git fails.
+
 ## [0.1.8] - 2026-11-02
 
 ### Added
@@ -93,7 +98,8 @@ First public release: a self-hosted assistant that collects your tasks (GitHub, 
 - One machine or split mode (server on a VPS, runner on a laptop over an SSH tunnel); macOS LaunchAgent and Linux systemd unit for the runner.
 - Cross-review by a different model family before the draft PR, optional read-only plan first.
 
-[Unreleased]: https://github.com/dommy1985/Jarvis/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/dommy1985/Jarvis/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/dommy1985/Jarvis/compare/v0.1.9...v0.1.10
 [0.1.8]: https://github.com/dommy1985/Jarvis/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/dommy1985/Jarvis/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/dommy1985/Jarvis/compare/v0.1.5...v0.1.6
