@@ -382,6 +382,77 @@ def test_submodule_change_opens_two_prs(tmp_path):
                           capture_output=True, text=True).stdout
     assert fw_head in tree and "app.txt" in tree
     assert not (tmp_path / "wt" / "my-app-9").exists()  # worktree con submodule rimosso
+
+
+@pytest.mark.parametrize("branch_alive", [False, True])
+def test_orphan_submodule_pin_moves_to_default_branch(tmp_path, branch_alive):
+    def git_out(*args, cwd):
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True).stdout.strip()
+
+    def init(path, remote):
+        run("git", "init", "-q", "--bare", "-b", "main", str(remote), cwd=tmp_path)
+        run("git", "clone", "-q", str(remote), str(path), cwd=tmp_path)
+        for k, v in (("user.email", "d@example.com"), ("user.name", "Alex")):
+            run("git", "config", k, v, cwd=path)
+
+    fw, fw_remote = tmp_path / "fw", tmp_path / "fw.git"
+    init(fw, fw_remote)
+    (fw / "lib.txt").write_text("v1\n")
+    run("git", "add", "-A", cwd=fw)
+    run("git", "commit", "-q", "-m", "v1", cwd=fw)
+    run("git", "push", "-q", "origin", "main", cwd=fw)
+    run("git", "checkout", "-q", "-b", "fix/x", cwd=fw)  # il lavoro pre-squash
+    (fw / "lib.txt").write_text("v2\n")
+    run("git", "commit", "-qam", "pre-squash", cwd=fw)
+    run("git", "push", "-q", "origin", "fix/x", cwd=fw)
+    pre_squash = git_out("rev-parse", "HEAD", cwd=fw)
+    app, app_remote = tmp_path / "app", tmp_path / "app.git"
+    init(app, app_remote)
+    (app / "app.txt").write_text("v1\n")
+    run("git", "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(fw_remote), "framework", cwd=app)
+    run("git", "-C", "framework", "checkout", "-q", pre_squash, cwd=app)  # l'app punta alla commit pre-squash
+    run("git", "add", "-A", cwd=app)
+    run("git", "commit", "-q", "-m", "init", cwd=app)
+    run("git", "push", "-q", "origin", "main", cwd=app)
+    run("git", "remote", "set-head", "origin", "main", cwd=app)
+    run("git", "checkout", "-q", "main", cwd=fw)
+    run("git", "merge", "-q", "--squash", "fix/x", cwd=fw)  # squash merge: stesso contenuto, altra commit
+    run("git", "commit", "-qm", "squash (#5)", cwd=fw)
+    run("git", "push", "-q", "origin", "main", cwd=fw)
+    if not branch_alive:
+        run("git", "push", "-q", "origin", "--delete", "fix/x", cwd=fw)
+    squash = git_out("rev-parse", "HEAD", cwd=fw)
+
+    j = job(app, tmp_path, name="my-app", test=None, copy_files=[],
+            setup="git -c protocol.file.allow=always submodule update --init")
+    j.update(run_id=9, branch="agent/9", repo="x/app", focus="framework",
+             task={**j["task"], "external_id": "x/fw#12", "title": "Process death"},
+             submodules=[{"path": "framework", "project": "fw", "repo": "x/fw", "local_path": str(fw),
+                          "test": "test -f lib.txt", "copy_files": []}])
+
+    def agent(cmd, cwd, timeout, env, check=None, on_line=None):
+        (Path(cwd) / "framework" / "lib.txt").write_text("v3\n")
+        return 0, json.dumps({"result": "Fix nel framework.", "is_error": False, "subtype": "success"})
+
+    bodies = []
+
+    def gh(cmd, cwd, timeout, env=None):
+        if cmd[2] == "create":
+            bodies.append(cmd[cmd.index("--body") + 1])
+        return 0, "https://github.com/x/fw/pull/5\n" if Path(cwd).name == "framework" else "https://github.com/x/app/pull/7\n"
+
+    api = Api()
+    runner.execute(j, api, run_agent=agent, gh=gh)
+    assert api.updates[-1]["status"] == "pr_open"
+    parent = git_out("rev-parse", "agent/9^", cwd=fw_remote)
+    if branch_alive:  # lavoro non ancora mergiato: il puntatore resta
+        assert parent == pre_squash and not any("non più in nessun branch" in b for b in bodies)
+    else:
+        assert parent == squash
+        assert subprocess.run(["git", "merge-base", "--is-ancestor", pre_squash, "agent/9"], cwd=fw_remote).returncode == 1
+        assert any(f"`{pre_squash[:10]}`" in b and f"`{squash[:10]}`" in b for b in bodies)
+
+
 def test_agy_skip_permissions(repo, tmp_path):
     repo, _ = repo
     j = job(repo, tmp_path)

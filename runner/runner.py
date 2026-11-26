@@ -822,6 +822,33 @@ def default_base(repo: Path, step: str) -> str:
         return git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", step=step)
 
 
+def realign_orphan_pin(path: Path) -> tuple[str, str] | None:
+    """Submodule fermo su una commit orfana (squash merge, branch cancellato): lo sposta su origin/<default>.
+
+    Orfana = non antenata del branch di default e non raggiungibile da nessun altro branch o tag di origin. Senza,
+    la PR del submodule si porterebbe dietro le commit pre-squash già mergiate. Un puntatore su un branch vivo
+    (lavoro non ancora mergiato) resta com'è. Best effort: con fetch o ref che falliscono, o un clone shallow
+    (la storia non basta per decidere), non cambia nulla. Va chiamato prima di copiare file nel submodule; il setup
+    del progetto è già girato sul vecchio puntatore. Vale per il solo submodule del focus: un altro submodule che
+    l'agente cambia porta comunque la sua storia. Ritorna (vecchio, nuovo) se ha spostato, altrimenti None."""
+    def out(*args: str) -> str | None:
+        code, text = git_sh(list(args), path, 300)
+        return text.strip() if code == 0 else None
+
+    if out("rev-parse", "--is-shallow-repository") != "false" or out("fetch", "origin", "--prune") is None:
+        return None
+    pinned, default = out("rev-parse", "HEAD"), out("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    if not pinned or not default or git_sh(["merge-base", "--is-ancestor", pinned, default], path, 60)[0] == 0:
+        return None
+    if out("for-each-ref", "--contains", pinned, "--count=1", "--format=%(refname)", "refs/remotes/origin",
+           "refs/tags") != "":
+        return None  # su un branch vivo, su un tag o illeggibile
+    if out("checkout", "-q", "--detach", default) is None:
+        log.warning("submodule %s: spostamento su %s non riuscito, il puntatore resta", path, default)
+        return None
+    return pinned, out("rev-parse", "HEAD") or pinned
+
+
 BASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 
 
@@ -1081,9 +1108,12 @@ def execute(job: dict, api: Api, run_agent=sh_stream, gh=sh, usage=None) -> None
             path = wt / sub["path"]
             if not (path / ".git").exists():
                 raise StepError(step, tr("runner.err.submodule_missing", path=sub["path"]))
+            sub["pinned"] = git(path, "rev-parse", "HEAD", step=step)
+            if not repair and job.get("focus") == sub["path"] and (moved := realign_orphan_pin(path)):
+                notes.append(tr("runner.note.pin_orphan", path=sub["path"], old=moved[0][:10], new=moved[1][:10]))
+                sub["pinned"] = moved[1]
             sub["copied"] = copy_local(Path(sub["local_path"]).expanduser(), path, sub.get("copy_files"), notes,
                                        f"{sub['path']}/")
-            sub["pinned"] = git(path, "rev-parse", "HEAD", step=step)
             # La review guarda tutto il lavoro del task: nel submodule parte dal commit puntato dall'app su base.
             sub["review_base"] = git(wt, "rev-parse", f"{base}:{sub['path']}", step=step) if repair else sub["pinned"]
             sub["pr"] = next((u for u in (repair or {}).get("sub_pr_urls") or [] if sub["repo"] and

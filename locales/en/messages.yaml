@@ -466,6 +466,7 @@ runner.note.transient: 'the agent''s first attempt failed with a temporary error
 runner.note.reviewer_edited: 'the reviewer modified files in `{name}`: changes reverted'
 runner.note.fix_failed: 'fix failed: {error}'
 runner.note.sub_tests: 'tests of `{path}` (`{command}`): {result}'
+runner.note.pin_orphan: 'the `{path}` submodule pointer was at `{old}`, no longer on any origin branch (squash merge?): the work starts from `{new}`, the default branch'
 runner.plan_note_reverted: '
 
 

@@ -466,6 +466,7 @@ runner.note.transient: 'primo tentativo dell''agente fallito per un errore tempo
 runner.note.reviewer_edited: 'il revisore ha modificato file in `{name}`: modifiche annullate'
 runner.note.fix_failed: 'correzione non riuscita: {error}'
 runner.note.sub_tests: 'test di `{path}` (`{command}`): {result}'
+runner.note.pin_orphan: 'il puntatore del submodule `{path}` era su `{old}`, non più in nessun branch di origin (squash merge?): il lavoro parte da `{new}`, il branch di default'
 runner.plan_note_reverted: '
 
 
